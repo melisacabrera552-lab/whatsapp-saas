@@ -99,12 +99,12 @@ import {
 // ============================================================
 const BRAND = {
   name: "Agente WhatsApp",
-  primaryHex: "#B5F23D", // oklch(0.90 0.21 126) — Electric Lime
-  accentHex: "#B5F23D",
-  font: "Space Grotesk (display) · Geist Sans (body) · Geist Mono",
-  personality: "Glass + Electric — Apple/visionOS glassmorphism",
+  primaryHex: "#1A4FFF", // oklch(0.527 0.263 265) — Electric Blue (Pixiweb)
+  accentHex: "#1A4FFF",
+  font: "Satoshi (display) · Inter (body) · Instrument Serif (acento) · Geist Mono (datos)",
+  personality: "Pixiweb · Slate Navy — glass visionOS + acento eléctrico",
   audience: "B2B · operadores / setters / admins",
-  radius: "14px",
+  radius: "20px",
 };
 
 const HAS_AGENTATION = process.env.NEXT_PUBLIC_HAS_AGENTATION === "true";
@@ -283,25 +283,23 @@ function Typography() {
   return (
     <Section
       title="Typography"
-      description="Space Grotesk para display, Geist Sans para body, Geist Mono para datos."
-      tokens={["--font-display", "--font-geist-sans", "--font-geist-mono"]}
-      when="Máximo 3 tamaños de texto por pantalla. tracking-tight en headings grandes."
-      whenNot="No usar text-xs para texto de lectura sostenida."
+      description="Satoshi Medium para display (nunca Bold), Inter para body, Instrument Serif para la frase itálica de acento, Geist Mono para datos."
+      tokens={["font-display (Satoshi)", "font-body (Inter)", ".accent (Instrument Serif)", "font-mono"]}
+      when="Máximo 3 tamaños por pantalla. tracking-tight en headings. La coda .accent va en 1–4 palabras dentro de un heading."
+      whenNot="No usar Bold en headings (Pixiweb es Medium). Nunca .accent en body copy."
     >
       <div className="space-y-3">
-        <p className="font-display text-5xl font-bold tracking-tight">
-          Display / Hero
+        <p className="font-display text-5xl font-medium tracking-tight">
+          Turnos <span className="accent text-6xl">llenos</span>
         </p>
-        <p className="font-display text-3xl font-semibold tracking-tight">
+        <p className="font-display text-3xl font-medium tracking-tight">
           H1 · Inbox
         </p>
-        <p className="font-display text-2xl font-semibold">
+        <p className="font-display text-2xl font-medium">
           H2 · Conversaciones
         </p>
         <p className="text-xl font-medium">H3 · Detalle del contacto</p>
-        <p className="text-base">
-          Body — texto base de la interfaz (Geist Sans).
-        </p>
+        <p className="text-base">Body — texto base de la interfaz (Inter).</p>
         <p className="text-sm text-muted-foreground">
           Small / Caption — metadatos.
         </p>
@@ -935,7 +933,7 @@ function PatternKPI() {
                     <p className="text-sm text-muted-foreground">{label}</p>
                     <Icon className={cn("h-4 w-4", tint)} />
                   </div>
-                  <p className="mt-2 font-display text-3xl font-bold tracking-tight">
+                  <p className="mt-2 font-display text-3xl font-medium tracking-tight">
                     {value}
                   </p>
                   <p
@@ -1287,7 +1285,7 @@ export function ComponentShowcase() {
                 <span className="h-2 w-2 rounded-full bg-primary" />
                 UI Kit · solo desarrollo
               </div>
-              <h1 className="font-display text-4xl font-bold tracking-tight">
+              <h1 className="font-display text-4xl font-medium tracking-tight">
                 {BRAND.name}
               </h1>
               <p className="mt-1 max-w-xl text-sm text-muted-foreground">

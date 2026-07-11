@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import path from "node:path";
 
 const isDev = process.env.NODE_ENV !== "production";
 
@@ -43,6 +44,11 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Fija la raíz del proyecto. Hay un package-lock.json huérfano en el home
+  // (~/package-lock.json) que hacía que Turbopack infiriera mal el workspace root.
+  turbopack: {
+    root: path.join(__dirname),
+  },
   ...(process.env.NODE_ENV !== "production" && {
     experimental: {
       mcpServer: true,
@@ -55,7 +61,7 @@ const nextConfig: NextConfig = {
     },
   ],
   // Serve the app icon for legacy /favicon.ico probes (avoids a 404).
-  rewrites: async () => [{ source: "/favicon.ico", destination: "/icon.svg" }],
+  rewrites: async () => [{ source: "/favicon.ico", destination: "/icon.png" }],
 };
 
 export default nextConfig;

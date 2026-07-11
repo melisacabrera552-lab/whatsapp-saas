@@ -16,6 +16,7 @@ import {
   MessageCircle,
   Settings,
 } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 
 export default async function MainLayout({
@@ -58,7 +59,15 @@ export default async function MainLayout({
       >
         {/* Left: brand + workspace name */}
         <div className="flex items-center gap-2 min-w-0">
-          <span className="font-display text-base font-semibold text-primary tracking-tight shrink-0">
+          <Image
+            src="/brand/pixiweb-icon.png"
+            alt="Pixiweb"
+            width={600}
+            height={619}
+            priority
+            className="h-7 w-auto shrink-0"
+          />
+          <span className="font-display text-base font-medium text-primary tracking-tight shrink-0">
             Agente WA
           </span>
           {workspaceName && (

@@ -101,8 +101,10 @@ function run(cmd, opts = {}) {
 }
 
 function hasCli(name) {
+  // Windows cmd.exe (execSync's default shell there) has no `command -v`; use `where`.
+  const probe = process.platform === "win32" ? `where ${name}` : `command -v ${name}`;
   try {
-    execSync(`command -v ${name}`, { stdio: "ignore" });
+    execSync(probe, { stdio: "ignore" });
     return true;
   } catch {
     return false;

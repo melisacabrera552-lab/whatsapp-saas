@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 import { Building2, LogOut, Settings } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { logout } from "@/features/auth/services/actions";
@@ -38,7 +39,15 @@ export default async function AgencyLayout({
         )}
       >
         <div className="flex items-center gap-2.5">
-          <span className="font-display text-base font-semibold text-primary tracking-tight">
+          <Image
+            src="/brand/pixiweb-icon.png"
+            alt="Pixiweb"
+            width={600}
+            height={619}
+            priority
+            className="h-7 w-auto shrink-0"
+          />
+          <span className="font-display text-base font-medium text-primary tracking-tight">
             Agente WA
           </span>
           <Badge
