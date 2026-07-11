@@ -56,29 +56,21 @@ const config: Config = {
         },
       },
       borderRadius: {
+        // Escala Pixiweb — radios generosos. Card (rounded-xl) = 24px.
         lg: "var(--radius)",
         md: "calc(var(--radius) - 4px)",
         sm: "calc(var(--radius) - 8px)",
+        xl: "calc(var(--radius) + 4px)",
+        "2xl": "calc(var(--radius) + 12px)",
       },
       fontFamily: {
-        display: [
-          "var(--font-display)",
-          "ui-sans-serif",
-          "system-ui",
-          "sans-serif",
-        ],
-        body: [
-          "var(--font-geist-sans)",
-          "ui-sans-serif",
-          "system-ui",
-          "sans-serif",
-        ],
-        sans: [
-          "var(--font-geist-sans)",
-          "ui-sans-serif",
-          "system-ui",
-          "sans-serif",
-        ],
+        // Satoshi (Fontshare, vía @import en globals.css) — headings y UI
+        display: ["Satoshi", "var(--font-body)", "system-ui", "sans-serif"],
+        // Inter (next/font) — body, párrafos, micro-copy
+        body: ["var(--font-body)", "system-ui", "sans-serif"],
+        sans: ["var(--font-body)", "system-ui", "sans-serif"],
+        // Instrument Serif (next/font) — frase itálica de acento (.accent)
+        serif: ["var(--font-serif)", "Georgia", "serif"],
         mono: ["var(--font-geist-mono)", "ui-monospace", "monospace"],
       },
       keyframes: {

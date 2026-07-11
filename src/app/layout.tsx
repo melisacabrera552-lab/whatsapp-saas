@@ -1,15 +1,24 @@
 import type { Metadata } from "next";
-import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
-import { Space_Grotesk } from "next/font/google";
+import { Inter, Instrument_Serif } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { Agentation } from "agentation";
 import "./globals.css";
 
-const spaceGrotesk = Space_Grotesk({
+// Inter — body, párrafos, micro-copy (Pixiweb)
+const inter = Inter({
   subsets: ["latin"],
-  variable: "--font-display",
+  variable: "--font-body",
+  display: "swap",
+});
+
+// Instrument Serif — frase itálica de acento (.accent), gesto firma de Pixiweb
+const instrumentSerif = Instrument_Serif({
+  subsets: ["latin"],
+  weight: "400",
+  style: ["normal", "italic"],
+  variable: "--font-serif",
   display: "swap",
 });
 
@@ -26,7 +35,7 @@ export default function RootLayout({
   return (
     <html lang="es" suppressHydrationWarning>
       <body
-        className={`${GeistSans.variable} ${GeistMono.variable} ${spaceGrotesk.variable} font-body antialiased`}
+        className={`${inter.variable} ${instrumentSerif.variable} ${GeistMono.variable} font-body antialiased`}
       >
         <ThemeProvider
           attribute="class"

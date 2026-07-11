@@ -1,109 +1,139 @@
+/*
+ * Satoshi (display) — AUTO-HOSPEDADA en /public/fonts/satoshi.
+ * Se sirve desde 'self', así cumple la CSP estricta (font-src 'self') sin
+ * depender del CDN de Fontshare. Inter + Instrument Serif van vía next/font (layout.tsx).
+ */
+@font-face {
+  font-family: "Satoshi";
+  src: url("/fonts/satoshi/Satoshi-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Satoshi";
+  src: url("/fonts/satoshi/Satoshi-Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Satoshi";
+  src: url("/fonts/satoshi/Satoshi-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 /*
- * Design System — Agente WhatsApp · "Glass + Electric Lime"
- * Source of truth: /ui (component showcase). Ver COMPONENT_RULES.md.
+ * Design System — Agente WhatsApp · "Pixiweb · Slate Navy"
+ * Fuente de verdad de marca:       Pixiweb Design System Re-Branding (colors_and_type.css).
+ * Fuente de verdad de componentes: /ui (showcase). Ver COMPONENT_RULES.md.
  *
- * Tokens almacenados como triplets OKLch crudos -> Tailwind inyecta alpha vía
- * oklch(var(--token) / <alpha-value>). Esto habilita modificadores de opacidad
- * (bg-primary/10) manteniendo color OKLch nativo.
+ * Marca:   Slate Navy #1E293B / Deep Navy #0F172A
+ * Acento:  Electric   #1A4FFF  (CTAs, links, focus, ring)
+ * Tipos:   Satoshi (display) · Inter (body) · Instrument Serif (frase itálica de acento)
  *
- * Glassmorphism (estilo Apple/visionOS): la translucidez se aplica con utilidades
- * explícitas (.glass) — NO via los tokens semánticos, para que el vidrio "lea"
- * sobre el glow ambiental del fondo.
+ * Tokens = triplets OKLch crudos -> Tailwind inyecta alpha vía oklch(var(--token) / <alpha-value>).
+ * Esto habilita modificadores de opacidad (bg-primary/10) manteniendo color OKLch nativo.
+ *
+ * Glass (visionOS): la translucidez se aplica con utilidades explícitas (.glass) — NO via los
+ * tokens semánticos. El glow ambiental ahora es ELÉCTRICO (azul) para que el vidrio "lea".
  */
 
 @layer base {
   :root {
-    /* Light mode (toggle) — blanco frío neutro, NUNCA crema */
-    --background: 0.99 0.002 247;
-    --foreground: 0.2 0.01 264;
+    /* Light mode (toggle) — blanco frío Pixiweb (neutral-50 / white), NUNCA crema */
+    --background: 0.99 0.003 248;
+    --foreground: 0.2077 0.0398 265.8;
 
     --card: 1 0 0;
-    --card-foreground: 0.2 0.01 264;
+    --card-foreground: 0.2077 0.0398 265.8;
 
     --popover: 1 0 0;
-    --popover-foreground: 0.2 0.01 264;
+    --popover-foreground: 0.2077 0.0398 265.8;
 
-    /* Electric Lime — acento de marca (raro = explota) */
-    --primary: 0.9 0.21 126;
-    --primary-foreground: 0.24 0.05 128;
+    /* Electric — acento de marca (CTAs, links, focus) */
+    --primary: 0.5267 0.2633 264.7;
+    --primary-foreground: 0.99 0.005 250;
 
-    --secondary: 0.96 0.003 247;
-    --secondary-foreground: 0.25 0.01 264;
+    --secondary: 0.9683 0.0069 247.9;
+    --secondary-foreground: 0.2795 0.0368 260;
 
-    --muted: 0.96 0.003 247;
-    --muted-foreground: 0.5 0.012 264;
+    --muted: 0.9683 0.0069 247.9;
+    --muted-foreground: 0.5544 0.0407 257.4;
 
-    --accent: 0.95 0.008 247;
-    --accent-foreground: 0.22 0.01 264;
+    --accent: 0.9288 0.0126 255.5;
+    --accent-foreground: 0.2795 0.0368 260;
 
-    --destructive: 0.58 0.22 25;
+    --destructive: 0.6368 0.2078 25.3;
     --destructive-foreground: 0.99 0 0;
 
-    --success: 0.65 0.17 150;
-    --warning: 0.78 0.16 80;
-    --info: 0.62 0.15 250;
+    --success: 0.6959 0.1491 162.5;
+    --warning: 0.7686 0.1647 70.1;
+    --info: 0.5267 0.2633 264.7;
 
-    --border: 0.91 0.004 264;
-    --input: 0.91 0.004 264;
-    --ring: 0.9 0.21 126;
+    --border: 0.9288 0.0126 255.5;
+    --input: 0.9288 0.0126 255.5;
+    --ring: 0.5267 0.2633 264.7;
 
-    --chart-1: 0.9 0.21 126;
-    --chart-2: 0.62 0.15 250;
-    --chart-3: 0.78 0.16 80;
-    --chart-4: 0.65 0.17 150;
-    --chart-5: 0.58 0.22 25;
+    --chart-1: 0.5267 0.2633 264.7;
+    --chart-2: 0.6667 0.176 269.9;
+    --chart-3: 0.7686 0.1647 70.1;
+    --chart-4: 0.6959 0.1491 162.5;
+    --chart-5: 0.6368 0.2078 25.3;
 
     /* Glassmorphism (light) */
     --glass-bg: 1 0 0;
     --glass-bg-alpha: 0.6;
     --glass-border-alpha: 0.5;
 
-    --radius: 0.875rem;
+    --radius: 1.25rem;
   }
 
   .dark {
-    /* Dark mode (default) — deep cool black para que el glass + lime brillen */
-    --background: 0.17 0.006 264;
-    --foreground: 0.97 0.002 247;
+    /* Dark mode (default) — Deep Navy #0F172A base, para que el glass + electric brillen */
+    --background: 0.2077 0.0398 265.8;
+    --foreground: 0.98 0.005 250;
 
-    --card: 0.21 0.006 264;
-    --card-foreground: 0.97 0.002 247;
+    --card: 0.2449 0.0388 264.4;
+    --card-foreground: 0.98 0.005 250;
 
-    --popover: 0.2 0.006 264;
-    --popover-foreground: 0.97 0.002 247;
+    --popover: 0.2275 0.0376 263.4;
+    --popover-foreground: 0.98 0.005 250;
 
-    --primary: 0.9 0.21 126;
-    --primary-foreground: 0.22 0.05 128;
+    --primary: 0.5267 0.2633 264.7;
+    --primary-foreground: 0.99 0.01 250;
 
-    --secondary: 0.26 0.006 264;
-    --secondary-foreground: 0.97 0.002 247;
+    --secondary: 0.2795 0.0368 260;
+    --secondary-foreground: 0.98 0.005 250;
 
-    --muted: 0.26 0.006 264;
-    --muted-foreground: 0.7 0.012 264;
+    --muted: 0.2795 0.0368 260;
+    --muted-foreground: 0.7107 0.0351 256.8;
 
-    --accent: 0.27 0.006 264;
-    --accent-foreground: 0.97 0.002 247;
+    --accent: 0.3 0.036 262;
+    --accent-foreground: 0.98 0.005 250;
 
-    --destructive: 0.62 0.21 25;
-    --destructive-foreground: 0.98 0 0;
+    --destructive: 0.6368 0.2078 25.3;
+    --destructive-foreground: 0.99 0 0;
 
-    --success: 0.72 0.17 150;
-    --warning: 0.82 0.16 85;
-    --info: 0.68 0.14 250;
+    --success: 0.6959 0.1491 162.5;
+    --warning: 0.7686 0.1647 70.1;
+    --info: 0.6107 0.2098 267.5;
 
-    --border: 0.28 0.006 264;
-    --input: 0.3 0.006 264;
-    --ring: 0.9 0.21 126;
+    --border: 0.33 0.03 262;
+    --input: 0.35 0.03 262;
+    --ring: 0.5267 0.2633 264.7;
 
-    --chart-1: 0.9 0.21 126;
-    --chart-2: 0.68 0.14 250;
-    --chart-3: 0.82 0.16 85;
-    --chart-4: 0.72 0.17 150;
-    --chart-5: 0.62 0.21 25;
+    --chart-1: 0.5267 0.2633 264.7;
+    --chart-2: 0.6667 0.176 269.9;
+    --chart-3: 0.7686 0.1647 70.1;
+    --chart-4: 0.6959 0.1491 162.5;
+    --chart-5: 0.6368 0.2078 25.3;
 
     /* Glassmorphism (dark) */
     --glass-bg: 1 0 0;
@@ -119,16 +149,16 @@
 
   body {
     @apply bg-background text-foreground font-body antialiased;
-    /* Glow ambiental lime muy sutil para que el glass "lea" (estilo Apple) */
+    /* Glow ambiental ELÉCTRICO (azul) muy sutil para que el glass "lea" (estilo visionOS) */
     background-image:
       radial-gradient(
         60rem 40rem at 15% -10%,
-        oklch(0.9 0.21 126 / 0.06),
+        oklch(0.6107 0.2098 267.5 / 0.1),
         transparent 60%
       ),
       radial-gradient(
         50rem 40rem at 110% 10%,
-        oklch(0.9 0.21 126 / 0.03),
+        oklch(0.6107 0.2098 267.5 / 0.05),
         transparent 55%
       );
     background-attachment: fixed;
@@ -154,5 +184,35 @@
     -webkit-backdrop-filter: blur(28px) saturate(150%);
     backdrop-filter: blur(28px) saturate(150%);
     border: 1px solid oklch(var(--glass-bg) / var(--glass-border-alpha));
+  }
+
+  /*
+   * .accent — frase itálica en Instrument Serif, el gesto firma de Pixiweb.
+   * Usar en 1–4 palabras dentro de un heading. NUNCA en body copy ni en párrafos.
+   */
+  .accent {
+    font-family: var(--font-serif), Georgia, serif;
+    font-style: italic;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    color: oklch(var(--primary));
+  }
+
+  .dark .accent {
+    /* electric-200 — más luminoso para leer sobre Deep Navy */
+    color: oklch(0.7705 0.1164 271.1);
+  }
+
+  /*
+   * .shadow-cta — sombra con tinte eléctrico para el CTA primario (Pixiweb).
+   * El botón de acción principal NUNCA lleva sombra gris neutra.
+   */
+  .shadow-cta {
+    box-shadow: 0 6px 20px -6px oklch(var(--primary) / 0.5);
+    transition: box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .shadow-cta:hover {
+    box-shadow: 0 10px 28px -6px oklch(var(--primary) / 0.6);
   }
 }

@@ -37,7 +37,7 @@ export function ResetPasswordForm() {
   return (
     <div className={cn("glass rounded-xl p-8 w-full max-w-md space-y-6")}>
       <div className="space-y-1">
-        <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground">
+        <h1 className="font-display text-2xl font-medium tracking-tight text-foreground">
           Nueva contraseña
         </h1>
         <p className="text-sm text-muted-foreground">

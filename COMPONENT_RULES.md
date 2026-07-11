@@ -1,10 +1,12 @@
 # Component Rules — Agente WhatsApp
 
 Agentes: leer este archivo antes de crear o modificar cualquier componente UI.
-Última actualización: 2026-06-08
+Última actualización: 2026-07-11
 
-Design system: **Glass + Electric Lime** (glassmorphism estilo Apple/visionOS).
+Design system: **Pixiweb · Slate Navy** (glassmorphism visionOS + acento eléctrico).
+Marca: Slate Navy #1E293B / Deep Navy #0F172A · Acento único: Electric #1A4FFF.
 Fuente de verdad visual: `http://localhost:3000/ui` (solo desarrollo).
+Fuente de verdad de marca: `Pixiweb Design System Re-Branding/` (colors_and_type.css).
 
 ---
 
@@ -17,22 +19,23 @@ No crear variantes nuevas sin actualizar el showcase primero.
 ## Regla 2 — Tokens de color, nunca hex
 
 Correcto: `className="bg-primary text-primary-foreground"`
-Incorrecto: `className="bg-[#B5F23D] text-black"`
+Incorrecto: `className="bg-[#1A4FFF] text-white"`
 
 Tokens (OKLch via CSS vars, soportan opacidad — `bg-primary/10`):
 `bg-background, bg-card, bg-muted, bg-primary, bg-secondary, bg-accent,`
 `bg-destructive, bg-success, bg-warning, bg-info, bg-border, bg-input`
 `text-foreground, text-muted-foreground, text-primary, text-destructive`
 
-El acento lime (`--primary`) es raro a propósito: úsalo para EL CTA, no para todo.
+El acento eléctrico (`--primary`) es raro a propósito: úsalo para EL CTA, no para todo.
 
 ## Regla 3 — Fuentes del proyecto
 
-- Display/headings: **Space Grotesk** → `font-display`
-- Body/UI: **Geist Sans** → `font-body` (default)
+- Display/headings/UI: **Satoshi Medium** → `font-display` (NUNCA Bold)
+- Body/párrafos/micro-copy: **Inter** → `font-body` (default)
+- Frase itálica de acento (coda): **Instrument Serif** → `.accent` (ver Regla 12)
 - Datos (teléfonos, wamid, IDs, código): **Geist Mono** → `font-mono`
 
-Nunca Inter, Roboto ni Arial.
+Satoshi siempre en peso Medium (500), nunca Bold. Los headings no van en Inter.
 
 ## Regla 4 — Glassmorphism
 
@@ -86,3 +89,13 @@ No anidar Cards elevadas ni glass dentro de otra del mismo tipo.
 Dark es el tema por defecto (`defaultTheme="dark"`). El light existe vía toggle.
 Nunca uses `bg-white`, `text-black`, `bg-gray-*` — rompen el dark mode.
 Usa siempre los tokens semánticos (cambian solos con `.dark`).
+
+## Regla 12 — Coda itálica (el gesto firma de Pixiweb)
+
+La frase itálica en Instrument Serif es la firma de la marca. Aplicá `.accent`
+a 1–4 palabras dentro de un heading — nunca en body copy ni en párrafos.
+
+Correcto: `<h1 class="font-display font-medium">Turnos <span class="accent">llenos</span></h1>`
+
+Una por sección como mucho. Es un acento, no un patrón repetido.
+El acento también rige el copy: cortá hype words y emoji, usá *vos*, cerrá con la coda.
