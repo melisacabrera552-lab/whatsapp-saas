@@ -146,15 +146,20 @@ node scripts/seed-admin.mjs
 
 (Crea SOLO el super admin. Los workspaces de clientes se crean desde la app, paso 10.)
 
-**9. Agenda el cron del buffer (automático).**
+**9. Agenda los crons (automático).** Dos jobs vía pg_cron + pg_net: el del
+buffer (procesa mensajes de WhatsApp) y el de keep-alive (evita que Supabase
+pause el proyecto del plan gratuito tras 7 días sin actividad — hace un SELECT
+de solo-lectura dos veces al día, no escribe nada):
 
 ```bash
 node scripts/setup.mjs cron-apply
+node scripts/setup.mjs cron-apply keep-alive
 ```
 
-Usa el `SUPABASE_ACCESS_TOKEN` del paso 7 para agendar el cron vía Management API e
-imprime la verificación. Si no hay token, cae al camino manual: corre
-`node scripts/setup.mjs cron-sql` y pega el SQL en **Supabase → SQL Editor → Run**.
+Usa el `SUPABASE_ACCESS_TOKEN` del paso 7 para agendar cada cron vía Management
+API e imprime la verificación. Si no hay token, cae al camino manual: corre
+`node scripts/setup.mjs cron-sql` (o `cron-sql keep-alive`) y pega el SQL en
+**Supabase → SQL Editor → Run**.
 
 **10. Entra y crea tu primer workspace.** Abre `https://TU-URL.vercel.app/login`,
 entra con tu super admin, y en el **panel de agencia** (`/workspaces`) dale **crear
@@ -194,6 +199,10 @@ su propia integración de YCloud.
   dashboard de Vercel → Settings → Environment Variables.
 - **El agente no responde al WhatsApp:** revisa `cron.job_run_details` (paso 11),
   que el webhook de YCloud apunte a tu URL, y que `OPENROUTER_API_KEY` tenga saldo.
+- **El proyecto de Supabase aparece "Paused" en el dashboard:** confirma que el
+  cron `keep-alive` esté activo (`select * from cron.job where jobname =
+  'keep-alive';`). Si no corrió nunca, reactiva el proyecto manualmente desde el
+  dashboard y vuelve a agendarlo con `node scripts/setup.mjs cron-apply keep-alive`.
 
 ## Actualizar a una versión nueva
 
