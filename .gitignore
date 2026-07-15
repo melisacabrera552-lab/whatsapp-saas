@@ -27,7 +27,10 @@ tsconfig.tsbuildinfo
 .env.test.local
 .env.production.local
 .env*.local
-# ...but DO ship the template so the installer knows what to ask for
+.env*
+# ...but DO ship the template so the installer knows what to ask for.
+# This negation MUST stay below every .env* rule: git applies the last
+# matching pattern, so a broader .env* placed after it would re-ignore it.
 !.env.local.example
 
 # Debug logs
@@ -67,4 +70,11 @@ supabase/cron/*.filled.sql
 
 # NOTE: package-lock.json is intentionally NOT ignored.
 # A distribution template must ship its lockfile for reproducible installs.
-.env*
+
+# Forge — local agent tooling, not part of the SaaS. This is a distribution
+# repo: keeping these out means installers don't inherit someone else's
+# skills, agents, or CLAUDE.md.
+/.claude/
+/.forge/
+/CLAUDE.md
+/example.mcp.json
