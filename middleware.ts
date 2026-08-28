@@ -72,5 +72,10 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/).*)"],
+  matcher: [
+    // public/ assets (logo, fonts, avatars) must bypass the middleware: with no
+    // session they were redirected to /login, so the browser received HTML
+    // instead of the file.
+    "/((?!_next/static|_next/image|favicon.ico|api/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|avif|ico|woff2?|ttf|otf)$).*)",
+  ],
 };
