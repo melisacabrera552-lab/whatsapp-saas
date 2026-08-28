@@ -353,6 +353,13 @@ function Step4({
   const useCaseLabel =
     USE_CASES.find((u) => u.id === state.useCase)?.label ?? state.useCase ?? "";
 
+  // Misma razon que en integrations-tab: el webhook debe apuntar al dominio
+  // publico, no al origin del navegador ni a un path relativo.
+  const baseUrl =
+    process.env.NEXT_PUBLIC_APP_URL ??
+    (typeof window !== "undefined" ? window.location.origin : "");
+  const webhookUrl = `${baseUrl}/api/webhooks/ycloud?wsid=${workspaceId}`;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col items-center text-center gap-3 py-4">
@@ -377,7 +384,7 @@ function Step4({
         )}
         <Row
           label="Webhook URL"
-          value={`/api/webhooks/ycloud?wsid=${workspaceId}`}
+          value={webhookUrl}
           mono
         />
       </div>

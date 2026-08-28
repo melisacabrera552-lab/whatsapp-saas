@@ -128,10 +128,13 @@ function YCloudSection({
   const [testing, setTesting] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const webhookUrl =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/api/webhooks/ycloud?wsid=${workspaceId}`
-      : `/api/webhooks/ycloud?wsid=${workspaceId}`;
+  // El origin del navegador puede ser una URL de deploy o la generada por Vercel,
+  // y ambas quedan detras del SSO de Deployment Protection: YCloud recibe 401 y
+  // el webhook nunca llega. NEXT_PUBLIC_APP_URL es el dominio publico real.
+  const baseUrl =
+    process.env.NEXT_PUBLIC_APP_URL ??
+    (typeof window !== "undefined" ? window.location.origin : "");
+  const webhookUrl = `${baseUrl}/api/webhooks/ycloud?wsid=${workspaceId}`;
 
   function handleCopy() {
     navigator.clipboard.writeText(webhookUrl).then(() => {
