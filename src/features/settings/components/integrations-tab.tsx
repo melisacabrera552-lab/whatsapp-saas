@@ -378,6 +378,36 @@ function OpenRouterSection({
     (initial?.config?.daily_budget_tokens as number | undefined) ?? 1_000_000,
   );
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+
+  async function handleTest() {
+    setTesting(true);
+    try {
+      const res = await fetch(
+        `/api/workspace/${workspaceId}/integrations/openrouter/test`,
+        { method: "POST" },
+      );
+      const json = (await res.json()) as {
+        ok: boolean;
+        error?: string;
+        usage?: number | null;
+        limitRemaining?: number | null;
+      };
+      if (json.ok) {
+        const remaining =
+          typeof json.limitRemaining === "number"
+            ? ` — Crédito restante: USD ${json.limitRemaining.toFixed(2)}`
+            : "";
+        toast.success(`OpenRouter conectado${remaining}`);
+      } else {
+        toast.error(json.error ?? "Error al probar la conexión");
+      }
+    } catch {
+      toast.error("Error de red al probar la conexión");
+    } finally {
+      setTesting(false);
+    }
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -460,7 +490,21 @@ function OpenRouterSection({
           </p>
         </div>
 
-        <div className="pt-2">
+        <div className="flex items-center gap-2 pt-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleTest}
+            disabled={testing}
+            aria-busy={testing}
+          >
+            {testing && (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden />
+            )}
+            Probar conexión
+          </Button>
+
           <Button
             type="button"
             size="sm"
