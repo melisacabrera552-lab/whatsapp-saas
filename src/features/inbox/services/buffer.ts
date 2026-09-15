@@ -341,7 +341,11 @@ export async function processNextBatch(): Promise<ProcessBatchResult> {
           activeAgent ? { mode: activeAgent.type } : {},
         ),
         getBusinessInfo(batch.workspace_id),
-        searchKb(batch.workspace_id, mergedText, 3),
+        // KB is optional context: a failed embedding call must not block the reply.
+        searchKb(batch.workspace_id, mergedText, 3).catch((err: unknown) => {
+          console.error("[buffer] searchKb failed, replying without KB:", err);
+          return [];
+        }),
         listKbSourceLinks(batch.workspace_id),
       ]);
 
@@ -627,7 +631,7 @@ async function runSetterEvaluation(params: SetterEvalParams): Promise<void> {
       history.map((t) => `${t.role}: ${t.content}`).join("\n") +
       `\nuser: ${mergedText}`;
 
-    const evaluation = await evaluateLead(cfg, transcript);
+    const evaluation = await evaluateLead(cfg, transcript, workspaceId);
 
     // Persist score/qualified/summary on the contact (no migration needed).
     const nextCustomFields = {
