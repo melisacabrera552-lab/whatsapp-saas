@@ -20,10 +20,26 @@ import { CreateWorkspaceSheet } from "./create-workspace-sheet";
 import { switchWorkspace } from "@/features/workspace/services/actions";
 import { deleteWorkspaceForClient } from "../services/agency-actions";
 import { cn } from "@/lib/utils";
+import { FREE_SERVICE_MESSAGES_PER_MONTH } from "@/shared/lib/whatsapp-pricing";
 import type { WorkspaceWithStats } from "../types";
 
 interface Props {
   workspaces: WorkspaceWithStats[];
+}
+
+/**
+ * Amber once the month-end projection crosses Meta's free quota, red once the
+ * client is already over it. Lets the agency spot who will start costing money
+ * before the month closes.
+ */
+function quotaToneClass(workspace: WorkspaceWithStats): string {
+  if (workspace.service_messages_month > FREE_SERVICE_MESSAGES_PER_MONTH) {
+    return "text-destructive";
+  }
+  if (workspace.projected_service_messages > FREE_SERVICE_MESSAGES_PER_MONTH) {
+    return "text-warning";
+  }
+  return "text-foreground";
 }
 
 function formatDate(iso: string): string {
@@ -111,13 +127,14 @@ export function WorkspacesTable({ workspaces }: Props) {
           className={cn(
             "hidden md:grid gap-4 px-4 py-2.5",
             "border-b border-border bg-muted/40",
-            "grid-cols-[2fr_1fr_1fr_1fr_1fr_auto]",
+            "grid-cols-[1.6fr_0.7fr_1fr_1.1fr_1fr_1fr_auto]",
           )}
         >
           {[
             "Workspace",
             "Miembros",
             "Conversaciones",
+            "Mensajes mes",
             "YCloud",
             "Creado",
             "",
@@ -164,7 +181,7 @@ export function WorkspacesTable({ workspaces }: Props) {
             key={workspace.id}
             className={cn(
               "flex flex-col gap-3 px-4 py-4",
-              "md:grid md:grid-cols-[2fr_1fr_1fr_1fr_1fr_auto] md:items-center md:gap-4 md:py-3",
+              "md:grid md:grid-cols-[1.6fr_0.7fr_1fr_1.1fr_1fr_1fr_auto] md:items-center md:gap-4 md:py-3",
               "border-b border-border last:border-0",
               "hover:bg-muted/20 transition-colors duration-150",
             )}
@@ -196,6 +213,26 @@ export function WorkspacesTable({ workspaces }: Props) {
               </span>
               <p className="font-mono text-sm text-foreground">
                 {workspace.conversation_count}
+              </p>
+            </div>
+
+            {/* Mensajes del mes vs. cuota gratuita de Meta */}
+            <div className="flex items-center gap-2 md:block">
+              <span className="text-xs text-muted-foreground md:hidden">
+                Mensajes mes:
+              </span>
+              <p
+                className={cn(
+                  "font-mono text-sm tabular-nums",
+                  quotaToneClass(workspace),
+                )}
+                title={`Proyección a fin de mes: ${workspace.projected_service_messages.toLocaleString("es")}`}
+              >
+                {workspace.service_messages_month.toLocaleString("es")}
+                <span className="text-muted-foreground">
+                  {" / "}
+                  {FREE_SERVICE_MESSAGES_PER_MONTH.toLocaleString("es")}
+                </span>
               </p>
             </div>
 

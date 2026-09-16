@@ -6,6 +6,10 @@ export interface WorkspaceWithStats {
   member_count: number;
   conversation_count: number;
   ycloud_connected: boolean;
+  /** Outbound non-template messages this calendar month (Meta's free quota). */
+  service_messages_month: number;
+  /** Straight-line projection of that count to the end of the month. */
+  projected_service_messages: number;
 }
 
 export type UseCase = "setter" | "soporte" | "agendamiento" | "general";

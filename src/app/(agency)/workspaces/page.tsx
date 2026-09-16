@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getAllWorkspacesWithStats } from "@/features/agency/services/agency-actions";
 import { WorkspacesTable } from "@/features/agency/components/workspaces-table";
-import { Building2, Users, MessageCircle, Wifi } from "lucide-react";
+import { Building2, Users, MessageCircle, Wifi, Send } from "lucide-react";
+import { estimateCostUsd } from "@/shared/lib/whatsapp-pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,17 @@ export default async function AgencyWorkspacesPage() {
   );
   const connectedCount = workspaces.filter((w) => w.ycloud_connected).length;
 
+  // Meta's quota is per workspace, so the bill is the sum of each client's
+  // overage — not the overage of the combined total.
+  const totalMessagesMonth = workspaces.reduce(
+    (sum, w) => sum + w.service_messages_month,
+    0,
+  );
+  const projectedCostUsd = workspaces.reduce(
+    (sum, w) => sum + estimateCostUsd(w.projected_service_messages),
+    0,
+  );
+
   const kpis = [
     {
       label: "Workspaces",
@@ -56,6 +68,15 @@ export default async function AgencyWorkspacesPage() {
       value: connectedCount,
       icon: Wifi,
     },
+    {
+      label: "Mensajes este mes",
+      value: totalMessagesMonth.toLocaleString("es"),
+      icon: Send,
+      hint:
+        projectedCostUsd > 0
+          ? `Proyección de costo: USD ${projectedCostUsd.toFixed(2).replace(".", ",")}`
+          : "Todos los clientes dentro de la cuota gratuita",
+    },
   ];
 
   return (
@@ -71,8 +92,8 @@ export default async function AgencyWorkspacesPage() {
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {kpis.map(({ label, value, icon: Icon }) => (
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        {kpis.map(({ label, value, icon: Icon, hint }) => (
           <div
             key={label}
             className="rounded-xl border border-border bg-card p-4 space-y-2"
@@ -84,6 +105,11 @@ export default async function AgencyWorkspacesPage() {
             <p className="font-mono text-2xl font-bold text-foreground">
               {value}
             </p>
+            {hint && (
+              <p className="text-[11px] leading-tight text-muted-foreground">
+                {hint}
+              </p>
+            )}
           </div>
         ))}
       </div>

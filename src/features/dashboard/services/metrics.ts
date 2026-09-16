@@ -2,6 +2,15 @@
 
 import { createClient as createSbClient } from "@supabase/supabase-js";
 import type { ConversationState } from "@/features/inbox/types";
+import {
+  FREE_SERVICE_MESSAGES_PER_MONTH,
+  countBillable,
+  currentMonthStartUtc,
+  estimateCostUsd,
+  isPricingActive,
+  previousMonthStartUtc,
+  projectToMonthEnd,
+} from "@/shared/lib/whatsapp-pricing";
 
 function svc() {
   return createSbClient(
@@ -154,18 +163,6 @@ export async function getRecentConversations(
 // WhatsApp monthly outbound usage (Meta pricing, effective 2026-10-01)
 // ============================================
 
-// Meta gives every business phone number 1.000 free service messages per
-// calendar month. The quota does not roll over and is not shared between
-// numbers. Ref: YCloud pricing update effective 2026-10-01.
-const FREE_SERVICE_MESSAGES_PER_MONTH = 1_000;
-
-// Indicative Argentina utility/service rate in USD per delivered message.
-// Meta refreshes its rate card quarterly, so this is an estimate, not a bill.
-const SERVICE_MESSAGE_USD = 0.012;
-
-// Date the per-message billing for service messages kicks in.
-const PRICING_START = Date.UTC(2026, 9, 1); // 2026-10-01
-
 export interface WhatsappMonthlyUsage {
   monthLabel: string;
   /** Outbound non-template messages — these consume the free quota. */
@@ -184,10 +181,6 @@ export interface WhatsappMonthlyUsage {
   pricingActive: boolean;
 }
 
-function countBillable(serviceMessages: number): number {
-  return Math.max(0, serviceMessages - FREE_SERVICE_MESSAGES_PER_MONTH);
-}
-
 /**
  * Counts the outbound WhatsApp messages the workspace sent this calendar month
  * and projects them against Meta's free service-message quota.
@@ -202,12 +195,8 @@ export async function getWhatsappMonthlyUsage(
   const supabase = svc();
 
   const now = new Date();
-  const monthStart = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
-  );
-  const previousMonthStart = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1),
-  );
+  const monthStart = currentMonthStartUtc(now);
+  const previousMonthStart = previousMonthStartUtc(now);
 
   const outbound = () =>
     supabase
@@ -237,15 +226,7 @@ export async function getWhatsappMonthlyUsage(
   const serviceMessages = serviceResult.count ?? 0;
   const templateMessages = templateResult.count ?? 0;
 
-  // Straight-line projection: today's daily average held to the month's end.
-  const daysInMonth = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0),
-  ).getUTCDate();
-  const dayOfMonth = now.getUTCDate();
-  const projectedServiceMessages = Math.round(
-    (serviceMessages / dayOfMonth) * daysInMonth,
-  );
-
+  const projectedServiceMessages = projectToMonthEnd(serviceMessages, now);
   const billableMessages = countBillable(serviceMessages);
 
   return {
@@ -262,11 +243,10 @@ export async function getWhatsappMonthlyUsage(
       FREE_SERVICE_MESSAGES_PER_MONTH - serviceMessages,
     ),
     billableMessages,
-    estimatedCostUsd: billableMessages * SERVICE_MESSAGE_USD,
+    estimatedCostUsd: estimateCostUsd(serviceMessages),
     projectedServiceMessages,
-    projectedCostUsd:
-      countBillable(projectedServiceMessages) * SERVICE_MESSAGE_USD,
+    projectedCostUsd: estimateCostUsd(projectedServiceMessages),
     previousMonthServiceMessages: previousServiceResult.count ?? 0,
-    pricingActive: Date.now() >= PRICING_START,
+    pricingActive: isPricingActive(),
   };
 }

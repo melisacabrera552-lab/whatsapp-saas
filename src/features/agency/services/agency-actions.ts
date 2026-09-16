@@ -4,6 +4,10 @@ import { createClient } from "@/lib/supabase/server";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { provisionWorkspaceUser } from "@/lib/auth/provision-user";
+import {
+  currentMonthStartUtc,
+  projectToMonthEnd,
+} from "@/shared/lib/whatsapp-pricing";
 import type {
   ClientCredentials,
   CreateWorkspaceResult,
@@ -345,6 +349,30 @@ export async function getAllWorkspacesWithStats(): Promise<GetWorkspacesResult> 
     .eq("provider", "ycloud")
     .in("workspace_id", ids);
 
+  // Outbound service messages this month, one exact count per workspace.
+  // Counted per workspace instead of fetching rows because PostgREST caps a
+  // plain select at 1.000 rows, which would silently under-report busy months.
+  const now = new Date();
+  const monthStart = currentMonthStartUtc(now).toISOString();
+
+  const monthlyCounts = await Promise.all(
+    ids.map(async (workspaceId) => {
+      const { count } = await service
+        .from("messages")
+        .select("id", { count: "exact", head: true })
+        .eq("workspace_id", workspaceId)
+        .eq("direction", "out")
+        .neq("type", "template")
+        .neq("type", "system")
+        .or("status.is.null,status.neq.failed")
+        .gte("created_at", monthStart);
+
+      return [workspaceId, count ?? 0] as const;
+    }),
+  );
+
+  const monthlyMap = new Map<string, number>(monthlyCounts);
+
   // Build lookup maps
   const memberMap = new Map<string, number>();
   for (const m of memberships ?? []) {
@@ -379,6 +407,11 @@ export async function getAllWorkspacesWithStats(): Promise<GetWorkspacesResult> 
     member_count: memberMap.get(w.id) ?? 0,
     conversation_count: convMap.get(w.id) ?? 0,
     ycloud_connected: ycloudMap.get(w.id) ?? false,
+    service_messages_month: monthlyMap.get(w.id) ?? 0,
+    projected_service_messages: projectToMonthEnd(
+      monthlyMap.get(w.id) ?? 0,
+      now,
+    ),
   }));
 
   return { workspaces: result };
