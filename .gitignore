@@ -68,6 +68,9 @@ supabase/cron/*.filled.sql
 /blob-report/
 /playwright/.cache/
 
+# Capturas del MCP de Playwright: contienen mensajes reales de clientes
+/.playwright-mcp/
+
 # NOTE: package-lock.json is intentionally NOT ignored.
 # A distribution template must ship its lockfile for reproducible installs.
 
