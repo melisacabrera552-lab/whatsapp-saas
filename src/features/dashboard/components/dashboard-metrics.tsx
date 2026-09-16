@@ -12,12 +12,15 @@ import { cn } from "@/lib/utils";
 import type {
   WorkspaceMetrics,
   RecentConversation,
+  WhatsappMonthlyUsage,
 } from "@/features/dashboard/services/metrics";
 import type { ConversationState } from "@/features/inbox/types";
+import { WhatsappUsageCard } from "@/features/dashboard/components/whatsapp-usage-card";
 
 interface DashboardMetricsProps {
   metrics: WorkspaceMetrics;
   recentConversations: RecentConversation[];
+  whatsappUsage: WhatsappMonthlyUsage;
 }
 
 interface KpiCardProps {
@@ -108,6 +111,7 @@ function formatRelativeTime(iso: string | null): string {
 export function DashboardMetrics({
   metrics,
   recentConversations,
+  whatsappUsage,
 }: DashboardMetricsProps) {
   return (
     <div className="p-6 space-y-8 max-w-5xl mx-auto">
@@ -150,6 +154,9 @@ export function DashboardMetrics({
           icon={<Send className="h-4 w-4" aria-hidden="true" />}
         />
       </div>
+
+      {/* WhatsApp monthly quota */}
+      <WhatsappUsageCard usage={whatsappUsage} />
 
       {/* Recent conversations */}
       <div className="space-y-3">

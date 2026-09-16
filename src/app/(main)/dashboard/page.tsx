@@ -4,6 +4,7 @@ import { getActiveWorkspace } from "@/features/workspace/services/active-workspa
 import {
   getWorkspaceMetrics,
   getRecentConversations,
+  getWhatsappMonthlyUsage,
 } from "@/features/dashboard/services/metrics";
 import { DashboardMetrics } from "@/features/dashboard/components/dashboard-metrics";
 
@@ -30,15 +31,17 @@ export default async function DashboardPage() {
     );
   }
 
-  const [metrics, recentConversations] = await Promise.all([
+  const [metrics, recentConversations, whatsappUsage] = await Promise.all([
     getWorkspaceMetrics(membership.workspace_id),
     getRecentConversations(membership.workspace_id, 5),
+    getWhatsappMonthlyUsage(membership.workspace_id),
   ]);
 
   return (
     <DashboardMetrics
       metrics={metrics}
       recentConversations={recentConversations}
+      whatsappUsage={whatsappUsage}
     />
   );
 }
