@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getHLConfig } from "@/features/inbox/services/highlevel-client";
+import {
+  getHLConfig,
+  saveHLLocationTimeZone,
+} from "@/features/inbox/services/highlevel-client";
 import { requireWorkspaceMember } from "@/lib/auth/workspace-access";
 
 // POST /api/workspace/[id]/integrations/highlevel/test
@@ -10,7 +13,9 @@ export async function POST(
 ) {
   const { id: workspaceId } = await params;
 
-  const auth = await requireWorkspaceMember(workspaceId);
+  // Reads the workspace's HighLevel integration with the service role: same
+  // roles as the integrations SELECT policy (admin, manager).
+  const auth = await requireWorkspaceMember(workspaceId, { minRole: "manager" });
   if (!auth.ok) return auth.response;
 
   const cfg = await getHLConfig(workspaceId);
@@ -27,8 +32,10 @@ export async function POST(
       {
         headers: {
           Authorization: `Bearer ${cfg.token}`,
+          // GET /locations/{locationId}, HighLevel's OpenAPI spec.
           Version: "2021-07-28",
         },
+        signal: AbortSignal.timeout(10_000),
       },
     );
 
@@ -39,11 +46,14 @@ export async function POST(
       });
     }
 
-    const data = (await res.json()) as { location?: { name?: string } };
+    const data = (await res.json()) as { location?: { name?: string; timezone?: unknown } };
+    // The location's zone reads HighLevel's bare times (see scheduling-timezone.ts).
+    const timezone = await saveHLLocationTimeZone(workspaceId, data.location ?? {});
     return NextResponse.json({
       ok: true,
       locationName: data.location?.name ?? null,
       hasCalendar: Boolean(cfg.calendarId),
+      timezone,
     });
   } catch (err) {
     console.error(

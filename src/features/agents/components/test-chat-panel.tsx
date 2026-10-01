@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useRef, useEffect } from "react";
 import { Send, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,18 +9,21 @@ import { cn } from "@/lib/utils";
 import { findCatalogModel } from "@/features/agents/lib/model-catalog";
 import { formatWhatsAppMarkdown } from "@/features/inbox/services/text-formatter";
 import type { AgentDto } from "@/features/agents/types";
-
-interface Msg {
-  role: "user" | "assistant";
-  content: string;
-}
+import {
+  afterFailure,
+  historyToSend,
+  type PlaygroundMsg as Msg,
+} from "@/features/agents/lib/playground-history";
 
 export function TestChatPanel({
   workspaceId,
   agent,
+  isAdmin = false,
 }: {
   workspaceId: string;
   agent: AgentDto;
+  /** An admin's test runs write tools too; the server decides by role. */
+  isAdmin?: boolean;
 }) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -48,23 +52,35 @@ export function TestChatPanel({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: next }),
+          // Error bubbles stay in the panel: the model never sees them.
+          body: JSON.stringify({ messages: historyToSend(next) }),
         },
       );
-      const json = (await res.json()) as { text?: string; error?: string };
+      const json = (await res.json()) as {
+        text?: string;
+        error?: string;
+        wroteSomething?: boolean;
+      };
       setMessages((prev) => [
         ...prev,
-        {
-          role: "assistant",
-          content: res.ok
-            ? formatWhatsAppMarkdown(json.text ?? "")
-            : `⚠️ ${json.error ?? "Error al generar la respuesta"}`,
-        },
+        ...(res.ok
+          ? [{ role: "assistant" as const, content: formatWhatsAppMarkdown(json.text ?? "") }]
+          : afterFailure({
+              errorText: json.error ?? "Error al generar la respuesta",
+              wroteSomething: json.wroteSomething === true,
+              connectionLost: false,
+              isAdmin,
+            })),
       ]);
     } catch {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "⚠️ Error de conexión" },
+        ...afterFailure({
+          errorText: "Error de conexión",
+          wroteSomething: false,
+          connectionLost: true,
+          isAdmin,
+        }),
       ]);
     } finally {
       setLoading(false);
@@ -79,6 +95,26 @@ export function TestChatPanel({
         modelo <span className="font-medium text-foreground">{modelLabel}</span>
         . Usa el prompt publicado. No se envía nada por WhatsApp.
       </p>
+      <p className="text-xs text-muted-foreground">
+        ¿Quieres que alguien más lo pruebe? Compártele{" "}
+        <Link href="/probar" className="underline underline-offset-2">
+          /probar
+        </Link>
+        : una pantalla con solo el chat, donde corren únicamente las herramientas de
+        consulta. No aísla datos: para gente de fuera, usa un espacio de demostración.
+      </p>
+      {isAdmin ? (
+        <p className="text-xs text-warning">
+          Como admin, aquí corren también las herramientas de escritura que estén
+          activas: una cita agendada en la prueba es real (en HighLevel aparece
+          como &ldquo;[Prueba]&rdquo;, en el teléfono que escribas aquí).
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          En tu prueba solo corren las herramientas de lectura; las de escritura
+          (agendar, tools de n8n que escriben) solo corren para admins.
+        </p>
+      )}
 
       <div className="h-72 space-y-2 overflow-y-auto rounded-md border border-border/60 bg-muted/20 p-3">
         {messages.length === 0 ? (
@@ -93,7 +129,9 @@ export function TestChatPanel({
                 "max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap",
                 m.role === "user"
                   ? "ml-auto bg-primary/15"
-                  : "mr-auto border border-border/60 bg-card",
+                  : m.note
+                    ? "mr-auto border border-dashed border-border/60 text-xs text-muted-foreground"
+                    : "mr-auto border border-border/60 bg-card",
               )}
             >
               {m.content}

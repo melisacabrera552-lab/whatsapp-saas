@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createServiceClient } from "@supabase/supabase-js";
 import { z } from "zod";
+import { encryptCredentials } from "@/shared/lib/integration-secrets";
 
 // ─── Schema ───────────────────────────────────────────────────────────────────
 
@@ -11,9 +12,12 @@ export const OnboardingSchema = z.object({
   businessName: z.string().min(1, "El nombre del negocio es requerido"),
   industry: z.string().optional(),
   description: z.string().optional(),
-  ycloudApiKey: z.string().optional(),
-  ycloudPhone: z.string().optional(),
-  ycloudSigningSecret: z.string().optional(),
+  whatsappProvider: z.enum(["ycloud", "kapso"]).default("ycloud"),
+  whatsappApiKey: z.string().optional(),
+  whatsappPhone: z.string().optional(),
+  whatsappSigningSecret: z.string().optional(),
+  kapsoPhoneNumberId: z.string().optional(),
+  kapsoWabaId: z.string().optional(),
 });
 
 export type OnboardingInput = z.infer<typeof OnboardingSchema>;
@@ -26,7 +30,25 @@ export type OnboardingResult =
 const STARTER_PROMPTS: Record<string, string> = {
   setter: `Eres un agente de ventas amable y profesional para {{business_name}}. Tu objetivo es calificar leads y agendar citas. Haz preguntas de descubrimiento, escucha las necesidades del cliente y guíalo hacia una llamada o reunión.`,
   soporte: `Eres un agente de soporte al cliente para {{business_name}}. Responde preguntas con precisión, resuelve problemas con empatía y escala a un humano cuando sea necesario.`,
-  agendamiento: `Eres un asistente de agendamiento para {{business_name}}. Ayuda a los clientes a reservar citas, confirma disponibilidad y envía recordatorios.`,
+  agendamiento: `Eres un asistente de agendamiento para {{business_name}}. Tu objetivo es ayudar al cliente a reservar, reagendar o cancelar una cita.
+
+Para agendar:
+1. Pregunta qué día y horario prefiere (o rango de fechas) si aún no lo dijo.
+2. Antes de ofrecer horarios, consulta la disponibilidad real con la herramienta correspondiente. Nunca inventes ni supongas horarios libres.
+3. Ofrece 2-3 opciones concretas de la disponibilidad real que obtuviste.
+4. Cuando el cliente elija un horario, confírmalo con él antes de reservar.
+5. Reserva la cita con la herramienta correspondiente. Solo confirma la cita al cliente después de que la herramienta responda que se creó con éxito — nunca digas que quedó agendada sin haberla creado.
+6. Si no hay horarios disponibles en el rango pedido, ofrece el rango más cercano o pregunta por otra fecha.
+
+Para reagendar: confirma con el cliente cuál de sus citas quiere mover (fecha y hora exactas) y el nuevo horario que prefiere, consulta disponibilidad real igual que al agendar y solo entonces usa la herramienta de reagendar. Confirma el cambio al cliente solo si la herramienta responde con éxito.
+
+Para cancelar: confirma con el cliente cuál cita quiere cancelar (fecha y hora exactas) y que efectivamente quiere cancelarla antes de usar la herramienta de cancelar. Confirma la cancelación al cliente solo si la herramienta responde con éxito.
+
+Si no tienes una herramienta para agendar directamente, usa el link de agendamiento si está disponible.
+
+Si una herramienta falla o devuelve un error, dile al cliente honestamente que hubo un problema y que no puedes confirmar la acción — nunca interpretes un error como si la acción se hubiera completado con éxito.
+
+Si te preguntan algo que no tiene relación con el negocio o con agendar una cita, dilo con claridad: que eso no está relacionado y no puedes responderlo.`,
   general: `Eres un asistente virtual para {{business_name}}. Eres amable, claro y útil. Responde las preguntas del cliente y ayúdalo a obtener la información que necesita.`,
 };
 
@@ -72,6 +94,25 @@ export async function completeOnboarding(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
   );
+
+  // 3b. This action is an HTTP endpoint; the /onboarding page is not a lock.
+  //     Workspaces are created by the agency, so only a super admin may
+  //     onboard. Anyone else — a viewer, a deactivated ex-member, a client
+  //     whose workspace was deleted — must not mint an admin workspace running
+  //     on the agency's keys. A failed read is a denial, never a pass.
+  const { data: profile, error: profileError } = await serviceClient
+    .from("users")
+    .select("is_super_admin")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (profileError) {
+    console.error("[completeOnboarding] profile check error:", profileError);
+    return { error: "No se pudo verificar tu cuenta. Intenta de nuevo." };
+  }
+  if (profile?.is_super_admin !== true) {
+    return { error: "No tienes permiso para crear un espacio de trabajo" };
+  }
 
   // 4. Generate unique slug
   const baseSlug = generateSlug(data.businessName);
@@ -229,21 +270,34 @@ export async function completeOnboarding(
     });
   }
 
-  // 9. Save YCloud integration (if credentials provided)
-  if (data.ycloudApiKey) {
+  // 9. Save the WhatsApp integration (if credentials provided) with the
+  //    provider the workspace chose: YCloud or Kapso.
+  if (data.whatsappApiKey) {
+    const provider = data.whatsappProvider;
     const { error: intError } = await serviceClient
       .from("integrations")
       .insert({
         workspace_id: workspaceId,
-        provider: "ycloud",
+        provider,
         enabled: true,
-        credentials: {
-          ycloud_api_key: data.ycloudApiKey,
-          webhook_signing_secret: data.ycloudSigningSecret ?? "",
-        },
-        config: {
-          phone_number: data.ycloudPhone ?? "",
-        },
+        credentials: await encryptCredentials(
+          {
+            [provider === "kapso" ? "kapso_api_key" : "ycloud_api_key"]:
+              data.whatsappApiKey,
+            webhook_signing_secret: data.whatsappSigningSecret ?? "",
+          },
+          workspaceId,
+          provider,
+        ),
+        config:
+          provider === "kapso"
+            ? {
+                phone_number: data.whatsappPhone ?? "",
+                // Meta's ids: phone_number_id sends, waba_id manages templates.
+                phone_number_id: data.kapsoPhoneNumberId ?? "",
+                waba_id: data.kapsoWabaId ?? "",
+              }
+            : { phone_number: data.whatsappPhone ?? "" },
         oauth_tokens: {},
       });
 

@@ -7,6 +7,7 @@ import {
 import { processInbound } from "@/features/inbox/services/normalizer";
 import { checkRateLimits } from "@/features/inbox/services/cost-tracker";
 import {
+  hasTimeToClaim,
   upsertBatch,
   processNextBatch,
 } from "@/features/inbox/services/buffer";
@@ -18,10 +19,27 @@ import {
   transcribeAudio,
   describeImage,
 } from "@/features/inbox/services/media-understanding";
+import { decryptCredentials } from "@/shared/lib/integration-secrets";
+import { applyMessageStatus } from "@/features/inbox/services/message-status";
+import { extractWebhookError } from "@/features/inbox/services/whatsapp-errors";
+import {
+  checkDestination,
+  internationalDigits,
+  phoneString,
+  samePhone,
+} from "@/features/inbox/services/phone";
+import { workspaceCountryCode } from "@/features/inbox/services/country-code";
+import { emitEventOncePerDay } from "@/features/inbox/services/daily-events";
 
 // Keep the function alive long enough for the best-effort fast path below
 // (sleep through the buffer window + AI generation). The cron is the fallback.
-export const maxDuration = 60;
+//
+// The budget is SHARED: the fast path first sleeps the whole silence window
+// (30 s by default, up to 120 s) and only then runs the agent turn, and it only
+// claims a batch with time left to finish it (hasTimeToClaim). 300 s is the
+// Hobby maximum with Fluid Compute, and stays below claim_next_batch()'s
+// 7-minute stale lease.
+export const maxDuration = 300;
 
 function svc() {
   return createSbClient(
@@ -30,52 +48,8 @@ function svc() {
   );
 }
 
-// WH-02: monotonic status order — never go backwards
-const STATUS_ORDER = ["queued", "sent", "delivered", "read"] as const;
-type OrderedStatus = (typeof STATUS_ORDER)[number];
-type MessageStatus = OrderedStatus | "failed";
-
-async function handleStatusUpdate(
-  supabase: ReturnType<typeof svc>,
-  wamid: string,
-  newStatus: string,
-): Promise<void> {
-  const { data: msg } = await supabase
-    .from("messages")
-    .select("id, status")
-    .eq("wamid", wamid)
-    .single();
-
-  // Message not found — can happen for outbound we didn't track
-  if (!msg) return;
-
-  const current = msg.status as MessageStatus | null;
-
-  // 'failed' is terminal — always apply regardless of current state
-  if (newStatus === "failed") {
-    await supabase
-      .from("messages")
-      .update({ status: "failed" })
-      .eq("id", msg.id);
-    return;
-  }
-
-  // For ordered statuses: only advance, never go back
-  const currentIdx = current
-    ? STATUS_ORDER.indexOf(current as OrderedStatus)
-    : -1;
-  const newIdx = STATUS_ORDER.indexOf(newStatus as OrderedStatus);
-
-  if (newIdx > currentIdx) {
-    await supabase
-      .from("messages")
-      .update({ status: newStatus })
-      .eq("id", msg.id);
-  }
-  // else: same or lower status — ignore (monotonic guarantee)
-}
-
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  const startedAt = Date.now();
   try {
     const rawBody = await request.text();
     const sigHeader = request.headers.get("YCloud-Signature");
@@ -144,11 +118,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         .eq("enabled", true)
         .limit(10);
 
+      const destination = phoneString(toPhone);
       ws =
-        (integrations ?? []).find(
-          (i: IntegrationRow) =>
-            (i.config as { phone_number?: string }).phone_number === toPhone,
-        ) ?? null;
+        (integrations ?? []).find((i: IntegrationRow) => {
+          const configured = phoneString(i.config?.phone_number);
+          return Boolean(configured && destination && samePhone(configured, destination));
+        }) ?? null;
     }
 
     // No resolvable workspace → 401. A status update without a resolvable
@@ -157,7 +132,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const creds = ws.credentials as {
+    // The workspace was resolved via config.phone_number / wsid — both
+    // plaintext — so decryption happens only after we know which row we need.
+    const creds = (await decryptCredentials(
+      ws.credentials,
+      ws.workspace_id,
+      "ycloud",
+    )) as {
       ycloud_api_key?: string;
       webhook_signing_secret?: string;
     };
@@ -175,10 +156,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // WH-02: monotonic status updates — only reached after signature verification.
     if (isStatusUpdate) {
       const statusData = (
-        body as { whatsappMessage?: { wamid?: string; status?: string } }
+        body as {
+          whatsappMessage?: { id?: string; wamid?: string; status?: string };
+        }
       ).whatsappMessage;
-      if (statusData?.wamid && statusData?.status) {
-        await handleStatusUpdate(supabase, statusData.wamid, statusData.status);
+      // YCloud assigns the wamid after the send, so its own message id is what
+      // our outbound row holds at first (meta.ycloud_id).
+      if (statusData?.status && (statusData.wamid || statusData.id)) {
+        await applyMessageStatus(supabase, ws.workspace_id, {
+          wamid: statusData.wamid ?? null,
+          providerMessageId: statusData.id ?? null,
+          status: statusData.status,
+          error:
+            statusData.status === "failed" ? extractWebhookError(body) : null,
+        });
       }
       return NextResponse.json({ received: true });
     }
@@ -186,6 +177,48 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const normalized = parseInbound(body);
     if (!normalized) {
       return NextResponse.json({ received: true });
+    }
+
+    // Routed by ?wsid, the signature only proves the event came from YCloud
+    // with this workspace's secret — not that it is for this workspace's
+    // number. A message for another number is ignored and left as an event
+    // for the workspace (once a day), never filed under it. The check needs
+    // the configured number with its country code: a national one is
+    // accepted, with an event saying so. Without a number, it's accepted.
+    if (wsidParam) {
+      const configuredPhone = ws.config?.phone_number;
+      const workspaceId = ws.workspace_id;
+      // Bare digits are read with the workspace's country code (only then).
+      const configuredText = phoneString(configuredPhone);
+      const countryCode =
+        configuredText && !internationalDigits(configuredText)
+          ? await workspaceCountryCode(supabase, workspaceId)
+          : undefined;
+      const destination = checkDestination(
+        configuredPhone,
+        normalized.workspacePhone,
+        countryCode,
+      );
+      if (destination === "mismatch") {
+        console.warn(
+          "[webhook] inbound for another number on this workspace's webhook URL — ignored",
+        );
+        after(() =>
+          emitEventOncePerDay(supabase, workspaceId, "inbound_destination_mismatch", "warn", {
+            configured_phone: phoneString(configuredPhone),
+            destination_phone: phoneString(normalized.workspacePhone),
+          }),
+        );
+        return NextResponse.json({ received: true, ignored: "destination_mismatch" });
+      }
+      if (destination === "unenforced") {
+        after(() =>
+          emitEventOncePerDay(supabase, workspaceId, "inbound_destination_unchecked", "warn", {
+            reason: "phone_number_without_country_code",
+            configured_phone: phoneString(configuredPhone),
+          }),
+        );
+      }
     }
 
     const workspaceId = ws.workspace_id as string;
@@ -209,6 +242,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       ? async () => {
           try {
             const mediaMeta = await downloadAndStoreMedia({
+              provider: "ycloud",
               link: mediaLink,
               apiKey: creds.ycloud_api_key ?? "",
               workspaceId,
@@ -219,7 +253,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
                 normalized.text && normalized.text !== "[Multimedia]"
                   ? normalized.text
                   : undefined,
-              ycloudMediaId: normalized.mediaId ?? undefined,
+              mediaId: normalized.mediaId ?? undefined,
             });
             if (!mediaMeta) return;
 
@@ -250,6 +284,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           }
         }
       : null;
+
+    // A reaction is recorded in the thread, but it isn't something to answer:
+    // it must not start a paid agent turn.
+    if (normalized.rawType === "reaction") {
+      return NextResponse.json({ received: true, reaction: true });
+    }
 
     // AI is toggled off — still fetch the media so the human agent sees it.
     if (!conversation.ai_enabled) {
@@ -297,6 +337,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       await new Promise((resolve) =>
         setTimeout(resolve, effectiveSilenceMs + 500),
       );
+      // Without time to finish a turn, leave the batch to the cron.
+      if (!hasTimeToClaim(startedAt, maxDuration)) return;
       try {
         await processNextBatch();
       } catch (e) {

@@ -1,34 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { createClient as svcClient } from "@supabase/supabase-js";
-import {
-  generateChatReply,
-  getWorkspaceModel,
-} from "@/features/inbox/services/openrouter";
-import { resolveSystemPrompt } from "@/features/inbox/services/prompt-resolver";
-import {
-  buildSystemPrompt,
-  type PromptGuardrails,
-} from "@/features/inbox/services/prompt-builder";
-import {
-  searchKb,
-  formatKbContext,
-  listKbSourceLinks,
-  formatKbReferenceLinks,
-} from "@/features/inbox/services/kb-service";
-import {
-  getBusinessInfo,
-  buildBusinessInfoContext,
-  buildNowContext,
-} from "@/features/inbox/services/business-info";
-import { getEnabledTools } from "@/features/tools/services/tool-configs";
-import type { AgentConfig } from "@/features/agents/types";
+import { isCatalogModel } from "@/features/agents/lib/model-catalog";
+import { runAgentPlayground } from "@/features/agents/services/agent-playground";
 
 // POST /api/workspace/[id]/agents/[agentId]/test-chat
 // In-UI playground: replies with the agent's model + (draft or published) prompt
 // WITHOUT sending WhatsApp or persisting a conversation. Token cost is logged to
-// `events` (type='agent_test_chat'), never to recordLlmUsage.
+// `events` (type='agent_test_chat'), never to recordLlmUsage; those rows count
+// toward the workspace's daily budget and an hourly cap. The pipeline is
+// runAgentPlayground(), shared with /probar.
+
+// The whole conversation the playground may send in one request.
+const MAX_TOTAL_CHARS = 40_000;
 
 const Schema = z.object({
   messages: z
@@ -41,15 +25,12 @@ const Schema = z.object({
     .min(1)
     .max(20),
   draftPromptBody: z.string().max(50_000).optional(),
-  modelOverride: z.string().max(120).optional(),
+  // Only the curated catalog: the playground spends the workspace's key.
+  modelOverride: z
+    .string()
+    .refine((id) => isCatalogModel(id), "Modelo no permitido")
+    .optional(),
 });
-
-function svc() {
-  return svcClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  );
-}
 
 export async function POST(
   req: NextRequest,
@@ -85,132 +66,82 @@ export async function POST(
     );
   }
 
-  const db = svc();
-
-  // Load the agent and defend against IDOR (workspace mismatch).
-  const { data: agent } = await db
-    .from("agents")
-    .select("id, workspace_id, type, name, model, config")
-    .eq("id", agentId)
-    .maybeSingle();
-  if (!agent || agent.workspace_id !== workspaceId) {
+  const totalChars = parsed.data.messages.reduce(
+    (sum, m) => sum + m.content.length,
+    0,
+  );
+  if (totalChars > MAX_TOTAL_CHARS) {
     return NextResponse.json(
-      { error: "Agente no encontrado" },
-      { status: 404 },
+      { error: "La conversación de prueba es demasiado larga. Reiníciala." },
+      { status: 400 },
     );
   }
 
-  // Resolve model + system prompt.
-  const model =
-    parsed.data.modelOverride ??
-    (agent.model as string | null) ??
-    (await getWorkspaceModel(workspaceId));
-
-  let promptBody = parsed.data.draftPromptBody;
-  let guardrails: PromptGuardrails | null = null;
-  if (!promptBody) {
-    const resolved = await resolveSystemPrompt(workspaceId, {
-      mode: agent.type as string,
-    });
-    promptBody =
-      resolved?.body ??
-      "Eres un asistente de WhatsApp. Responde de forma concisa y útil en español.";
-    guardrails = resolved?.guardrails ?? null;
-  }
-
-  // Mirror production (buffer.ts) exactly via the shared builder: business info,
-  // KB search, response style, variable substitution and strict guardrails.
-  const info = await getBusinessInfo(workspaceId);
-  const businessName =
-    ((info?.structured as { name?: string } | null)?.name as string) ??
-    "tu negocio";
-  const bizContext = buildBusinessInfoContext(info);
-  const timeZone =
-    ((info?.structured as { timezone?: string } | null)?.timezone as string) ??
-    "America/Mexico_City";
-
-  // KB: search with the latest user message, just like buffer.ts.
-  const lastUserMessage =
-    [...parsed.data.messages].reverse().find((m) => m.role === "user")
-      ?.content ?? "";
-  const [kbResults, kbLinks] = await Promise.all([
-    searchKb(workspaceId, lastUserMessage, 3),
-    listKbSourceLinks(workspaceId),
-  ]);
-  const kbContext = [
-    formatKbContext(kbResults),
-    formatKbReferenceLinks(kbLinks),
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-
-  const agentConfig = (agent.config ?? {}) as AgentConfig;
-  const systemPrompt = buildSystemPrompt({
-    nowContext: buildNowContext(timeZone),
-    bizContext,
-    promptBase: promptBody,
-    kbContext,
-    responseStyle: agentConfig.responseStyle ?? null,
-    guardrails,
-    vars: {
-      agentName: agent.name as string,
-      businessName,
-      contactName: "",
-    },
+  const result = await runAgentPlayground({
+    surface: "agent_test_chat",
+    workspaceId,
+    agentId,
+    userId: user.id,
+    role,
+    messages: parsed.data.messages,
+    draftPromptBody: parsed.data.draftPromptBody,
+    modelOverride: parsed.data.modelOverride,
+    maxOutputTokens: 700,
   });
 
-  try {
-    // Enable the workspace's tools in the playground so the agent can actually
-    // check availability / book (e.g. GHL). The playground has no live
-    // conversation, so the tool context carries only the workspace; tools that
-    // need a contact (booking) take an explicit contact_phone arg instead.
-    const tools = await getEnabledTools(workspaceId);
-    const reply = await generateChatReply({
-      model,
-      systemPrompt,
-      messages: parsed.data.messages,
-      maxOutputTokens: 700,
-      workspaceId,
-      tools,
-      toolContext: {
-        workspaceId,
-        conversationId: "",
-        contactId: "",
-      },
-    });
-
-    // Best-effort observability — never blocks the response.
-    void db
-      .from("events")
-      .insert({
-        workspace_id: workspaceId,
-        type: "agent_test_chat",
-        payload: {
-          agent_id: agentId,
-          model,
-          input_tokens: reply.promptTokens,
-          output_tokens: reply.completionTokens,
-        },
-      })
-      .then(
-        () => undefined,
-        () => undefined,
-      );
-
+  if (result.ok) {
     return NextResponse.json({
-      text: reply.text,
-      inputTokens: reply.promptTokens,
-      outputTokens: reply.completionTokens,
-      model,
+      text: result.text,
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      model: result.model,
+      writeTools: result.writeTools,
     });
-  } catch (err) {
-    console.error("[agents/test-chat]", err);
-    // Admin-only playground — surface the real reason so it's diagnosable
-    // (model id, rate limit, upstream 502…) instead of a generic message.
-    const detail = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      { error: `No se pudo generar la respuesta (${model}): ${detail}` },
-      { status: 502 },
-    );
+  }
+
+  switch (result.reason) {
+    case "agent_not_found":
+      return NextResponse.json(
+        { error: "Agente no encontrado" },
+        { status: 404 },
+      );
+    case "model_not_in_catalog":
+      return NextResponse.json(
+        {
+          error: `El modelo de este agente (${result.model}) ya no está en el catálogo. Elige uno del catálogo para probarlo.`,
+        },
+        { status: 400 },
+      );
+    case "refused":
+      return result.response;
+    case "empty_reply":
+      return NextResponse.json(
+        {
+          error: result.writeTools
+            ? "El agente no respondió con texto (a veces pasa después de usar una herramienta). Si tenía herramientas de escritura activas, revisa qué quedó hecho antes de reintentar."
+            : "El agente no respondió con texto. Reformula el mensaje o intenta de nuevo.",
+          wroteSomething: result.writeTools ? true : undefined,
+        },
+        { status: 502 },
+      );
+    case "generation_failed":
+      // A turn that already ran a write (a booking, an n8n write) must not be
+      // sent again blindly: it would run it again.
+      if (result.wroteSomething) {
+        return NextResponse.json(
+          {
+            error:
+              "La respuesta falló después de que se ejecutó una acción (por ejemplo, agendar). Revisa en el calendario o en n8n qué quedó hecho antes de reintentar.",
+            wroteSomething: true,
+          },
+          { status: 502 },
+        );
+      }
+      // Admin/manager playground — surface the real reason so it's diagnosable
+      // (model id, rate limit, upstream 502…) instead of a generic message.
+      return NextResponse.json(
+        { error: `No se pudo generar la respuesta (${result.model}): ${result.detail}` },
+        { status: 502 },
+      );
   }
 }

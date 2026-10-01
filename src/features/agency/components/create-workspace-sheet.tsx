@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import {
   Sheet,
@@ -57,14 +57,22 @@ export function CreateWorkspaceSheet({ open, onClose, onCreated }: Props) {
   const [clientEmail, setClientEmail] = useState("");
   const [clientPassword, setClientPassword] = useState("");
   const [useCase, setUseCase] = useState<UseCase>("general");
-  const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
+  const [webhookUrls, setWebhookUrls] = useState<{
+    ycloud: string;
+    kapso: string;
+  } | null>(null);
   const [credentials, setCredentials] = useState<{
     email: string;
     password: string;
   } | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"ycloud" | "kapso" | null>(null);
   const [copiedCred, setCopiedCred] = useState(false);
   const [saving, startSave] = useTransition();
+  const emailInputRef = useRef<HTMLInputElement>(null);
+  const [needsConfirmation, setNeedsConfirmation] = useState<{
+    email: string;
+    fullName: string | null;
+  } | null>(null);
 
   function handleClose() {
     if (saving) return;
@@ -72,18 +80,19 @@ export function CreateWorkspaceSheet({ open, onClose, onCreated }: Props) {
     setClientEmail("");
     setClientPassword("");
     setUseCase("general");
-    setWebhookUrl(null);
+    setWebhookUrls(null);
     setCredentials(null);
-    setCopied(false);
+    setCopied(null);
     setCopiedCred(false);
+    setNeedsConfirmation(null);
     onClose();
   }
 
-  function handleCopy() {
-    if (!webhookUrl) return;
-    navigator.clipboard.writeText(webhookUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  function handleCopy(provider: "ycloud" | "kapso") {
+    if (!webhookUrls) return;
+    navigator.clipboard.writeText(webhookUrls[provider]);
+    setCopied(provider);
+    setTimeout(() => setCopied(null), 2000);
   }
 
   function handleCopyCredentials() {
@@ -95,14 +104,14 @@ export function CreateWorkspaceSheet({ open, onClose, onCreated }: Props) {
     setTimeout(() => setCopiedCred(false), 2000);
   }
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  function submitWorkspace(confirmReuseExistingEmail: boolean) {
     startSave(async () => {
       const result = await createWorkspaceForClient({
         name,
         useCase,
         clientEmail: clientEmail || undefined,
         clientPassword: clientPassword || undefined,
+        confirmReuseExistingEmail,
       });
 
       if (result.error) {
@@ -110,11 +119,31 @@ export function CreateWorkspaceSheet({ open, onClose, onCreated }: Props) {
         return;
       }
 
-      setWebhookUrl(result.webhookUrl ?? null);
+      if (result.needsConfirmation) {
+        setNeedsConfirmation(result.existingUser);
+        return;
+      }
+
+      setNeedsConfirmation(null);
+      setWebhookUrls(result.webhookUrls ?? null);
       setCredentials(result.clientCredentials ?? null);
       toast.success("Workspace creado correctamente");
       onCreated();
     });
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    submitWorkspace(false);
+  }
+
+  function handleUseExistingAccount() {
+    submitWorkspace(true);
+  }
+
+  function handleChangeEmail() {
+    setNeedsConfirmation(null);
+    emailInputRef.current?.focus();
   }
 
   return (
@@ -136,7 +165,7 @@ export function CreateWorkspaceSheet({ open, onClose, onCreated }: Props) {
           </SheetDescription>
         </SheetHeader>
 
-        {webhookUrl ? (
+        {webhookUrls ? (
           // Success state — show webhook URL
           <div className="mt-6 space-y-5">
             {credentials && (
@@ -182,31 +211,38 @@ export function CreateWorkspaceSheet({ open, onClose, onCreated }: Props) {
                 Workspace creado
               </p>
               <p className="text-xs text-muted-foreground">
-                Comparte esta URL de webhook con tu cliente para conectar
-                YCloud:
+                El cliente elige su proveedor de WhatsApp en Configuración →
+                Integraciones. Comparte la URL de webhook del que vaya a usar:
               </p>
-              <div className="flex items-center gap-2 mt-1">
-                <code className="flex-1 rounded bg-muted px-2 py-1.5 font-mono text-xs text-foreground break-all">
-                  {webhookUrl}
-                </code>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="shrink-0"
-                  aria-label="Copiar URL"
-                  onClick={handleCopy}
-                >
-                  {copied ? (
-                    <CheckCheck
-                      className="h-4 w-4 text-primary"
-                      aria-hidden="true"
-                    />
-                  ) : (
-                    <Copy className="h-4 w-4" aria-hidden="true" />
-                  )}
-                </Button>
-              </div>
+              {(["ycloud", "kapso"] as const).map((provider) => (
+                <div key={provider} className="space-y-1 mt-1">
+                  <p className="text-xs font-medium text-foreground">
+                    {provider === "kapso" ? "Kapso (Estados Unidos)" : "YCloud"}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 rounded bg-muted px-2 py-1.5 font-mono text-xs text-foreground break-all">
+                      {webhookUrls[provider]}
+                    </code>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="shrink-0"
+                      aria-label={`Copiar URL de ${provider === "kapso" ? "Kapso" : "YCloud"}`}
+                      onClick={() => handleCopy(provider)}
+                    >
+                      {copied === provider ? (
+                        <CheckCheck
+                          className="h-4 w-4 text-primary"
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <Copy className="h-4 w-4" aria-hidden="true" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              ))}
             </div>
 
             <Button variant="outline" className="w-full" onClick={handleClose}>
@@ -249,9 +285,13 @@ export function CreateWorkspaceSheet({ open, onClose, onCreated }: Props) {
               </Label>
               <Input
                 id="ws-email"
+                ref={emailInputRef}
                 type="email"
                 value={clientEmail}
-                onChange={(e) => setClientEmail(e.target.value)}
+                onChange={(e) => {
+                  setClientEmail(e.target.value);
+                  setNeedsConfirmation(null);
+                }}
                 placeholder="cliente@empresa.com"
                 disabled={saving}
               />
@@ -310,14 +350,55 @@ export function CreateWorkspaceSheet({ open, onClose, onCreated }: Props) {
               </Select>
             </div>
 
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={saving || !name.trim()}
-              aria-busy={saving}
-            >
-              {saving ? "Dando de alta..." : "Dar de alta cliente"}
-            </Button>
+            {needsConfirmation && (
+              <div className="rounded-lg border border-warning/30 bg-warning/5 p-4 space-y-3">
+                <p className="text-sm text-foreground">
+                  El email{" "}
+                  <span className="font-medium">{needsConfirmation.email}</span> ya
+                  es la cuenta de{" "}
+                  <span className="font-medium">
+                    {needsConfirmation.fullName ?? needsConfirmation.email}
+                  </span>
+                  . ¿Usar esta misma cuenta para el workspace nuevo?
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  La cuenta conserva su contraseña actual (la que escribiste aquí
+                  no se aplica). Si el cliente no la recuerda, usa Miembros →
+                  Resetear clave.
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={handleChangeEmail}
+                    disabled={saving}
+                  >
+                    Cambiar email
+                  </Button>
+                  <Button
+                    type="button"
+                    className="flex-1"
+                    onClick={handleUseExistingAccount}
+                    disabled={saving}
+                    aria-busy={saving}
+                  >
+                    {saving ? "Confirmando..." : "Usar esta cuenta"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {!needsConfirmation && (
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={saving || !name.trim()}
+                aria-busy={saving}
+              >
+                {saving ? "Dando de alta..." : "Dar de alta cliente"}
+              </Button>
+            )}
           </form>
         )}
       </SheetContent>

@@ -11,6 +11,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { createClient as createSbClient } from "@supabase/supabase-js";
 import { syncContactFromHL } from "@/features/inbox/services/highlevel-client";
+import { decryptCredentials } from "@/shared/lib/integration-secrets";
+import { crmStatus } from "@/features/inbox/services/crm-sync";
 
 function svc() {
   return createSbClient(
@@ -71,7 +73,8 @@ export async function POST(req: NextRequest) {
   }
 
   const { credentials } = integration as HLIntegrationRow;
-  const secret = credentials?.highlevel_webhook_secret;
+  const decrypted = await decryptCredentials(credentials, wsid, "highlevel");
+  const secret = decrypted.highlevel_webhook_secret as string | undefined;
 
   if (!secret || !safeEqual(token, secret)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -93,6 +96,17 @@ export async function POST(req: NextRequest) {
       { error: "Could not determine HL contact id from payload" },
       { status: 400 },
     );
+  }
+
+  // Un solo CRM activo. Si HighLevel no es EL activo (HubSpot conectado, o dos filas
+  // habilitadas por datos previos al índice), no se escribe nada. 200 para que HL no reintente.
+  // Un error LEYENDO cuál es el activo no es "no activo": 500 para que HL reintente.
+  const status = await crmStatus(wsid, "highlevel");
+  if (status === "error") {
+    return NextResponse.json({ ok: false, error: "No se pudo procesar el webhook" }, { status: 500 });
+  }
+  if (status === "inactive") {
+    return NextResponse.json({ ok: true, synced: false, skipped: "crm_not_active" });
   }
 
   try {

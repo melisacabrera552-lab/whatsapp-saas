@@ -24,7 +24,9 @@ export async function POST(
 ) {
   const { id: workspaceId } = await params;
 
-  const auth = await requireWorkspaceMember(workspaceId);
+  // Reveals the key's spend and limit: same roles as the integrations SELECT
+  // policy (admin, manager).
+  const auth = await requireWorkspaceMember(workspaceId, { minRole: "manager" });
   if (!auth.ok) return auth.response;
 
   const apiKey = await getOpenRouterApiKey(workspaceId);
@@ -35,6 +37,7 @@ export async function POST(
   try {
     const res = await fetch("https://openrouter.ai/api/v1/key", {
       headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10_000),
     });
 
     if (res.ok) {

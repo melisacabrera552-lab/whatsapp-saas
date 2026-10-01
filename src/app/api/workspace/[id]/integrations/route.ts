@@ -6,13 +6,43 @@ import {
   requireWorkspaceMember,
   readJsonBody,
 } from "@/lib/auth/workspace-access";
+import {
+  encryptCredentials,
+  decryptCredentials,
+} from "@/shared/lib/integration-secrets";
+import {
+  isWhatsAppProvider,
+  missingWhatsAppFields,
+  WHATSAPP_PROVIDER_LABELS,
+  WORKSPACE_WHATSAPP_SETTINGS,
+} from "@/features/inbox/services/whatsapp-provider";
+import { saveHLLocationTimeZone } from "@/features/inbox/services/highlevel-client";
+
+import {
+  isCatalogModel,
+  MODEL_NOT_IN_CATALOG,
+} from "@/features/agents/lib/model-catalog";
+import { normalizeConfiguredPhone } from "@/features/inbox/services/ycloud-client";
+import { phoneString } from "@/features/inbox/services/phone";
+import { workspaceCountryCode } from "@/features/inbox/services/country-code";
+import { hubSpotTokenFingerprint } from "@/features/inbox/services/hubspot-client";
 
 const IntegrationSchema = z.object({
-  provider: z.enum(["ycloud", "openrouter", "highlevel"]),
+  provider: z.enum(["ycloud", "kapso", "openrouter", "highlevel", "caldotcom", "hubspot"]),
   enabled: z.boolean().optional(),
   credentials: z.record(z.string(), z.string()).optional(),
   config: z.record(z.string(), z.unknown()).optional(),
 });
+
+/**
+ * Un solo CRM activo por workspace. Lo IMPONE el índice uq_integrations_one_active_crm
+ * (20260922000002), para todos los escritores; acá solo se traduce su 23505 a un 409 legible.
+ * Cal.com es agenda, no CRM.
+ */
+const CRM_LABELS = { highlevel: "HighLevel", hubspot: "HubSpot" } as const;
+
+/** Claves de config que escribe SOLO el servidor (PUT e integrations/hubspot/test). */
+const SERVER_CONFIG_KEYS = ["properties_ready", "token_fingerprint", "portal_id"] as const;
 
 type IntegrationRow = {
   id: string;
@@ -32,6 +62,24 @@ function maskRecord(
   );
 }
 
+/** The YCloud key this save will leave: the one typed now, else the stored one. */
+async function ycloudApiKey(
+  newCreds: Record<string, string>,
+  stored: Record<string, unknown> | null,
+  workspaceId: string,
+): Promise<string | null> {
+  if (newCreds.ycloud_api_key) return newCreds.ycloud_api_key;
+  if (!stored) return null;
+  try {
+    const plain = (await decryptCredentials(stored, workspaceId, "ycloud")) as {
+      ycloud_api_key?: unknown;
+    };
+    return typeof plain.ycloud_api_key === "string" ? plain.ycloud_api_key : null;
+  } catch {
+    return null;
+  }
+}
+
 // GET: return integrations with masked credentials
 export async function GET(
   req: NextRequest,
@@ -39,7 +87,13 @@ export async function GET(
 ) {
   const { id: workspaceId } = await params;
 
-  const auth = await requireWorkspaceMember(workspaceId);
+  // This route reads through the service-role client, which bypasses RLS, so it
+  // has to reproduce the table's own policy: integrations_select_admins limits
+  // SELECT to admin/manager. Without this, any member (viewer/agent included)
+  // could read the HighLevel webhook token exposed below.
+  const auth = await requireWorkspaceMember(workspaceId, {
+    minRole: "manager",
+  });
   if (!auth.ok) return auth.response;
 
   const svc = svcClient(
@@ -54,35 +108,43 @@ export async function GET(
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
 
-  const masked = ((data ?? []) as IntegrationRow[]).map((row) => {
-    const base = {
-      id: row.id,
-      provider: row.provider,
-      enabled: row.enabled,
-      config: row.config ?? {},
-      credentials: maskRecord(row.credentials),
-      oauth_tokens: maskRecord(row.oauth_tokens),
-    };
-
-    // The HighLevel inbound-sync webhook token is low-sensitivity (it only
-    // authorizes inbound contact-sync), so expose it unmasked plus a prebuilt
-    // URL so the settings UI can render the webhook endpoint.
-    if (row.provider === "highlevel") {
-      const secret =
-        typeof row.credentials?.highlevel_webhook_secret === "string"
-          ? row.credentials.highlevel_webhook_secret
-          : "";
-      return {
-        ...base,
-        highlevel_webhook_secret: secret,
-        highlevel_webhook_url: secret
-          ? `${appUrl}/api/webhooks/highlevel?wsid=${workspaceId}&token=${secret}`
-          : "",
+  const masked = await Promise.all(
+    ((data ?? []) as IntegrationRow[]).map(async (row) => {
+      const base = {
+        id: row.id,
+        provider: row.provider,
+        enabled: row.enabled,
+        config: row.config ?? {},
+        credentials: maskRecord(row.credentials),
+        oauth_tokens: maskRecord(row.oauth_tokens),
       };
-    }
 
-    return base;
-  });
+      // The HighLevel inbound-sync webhook token has to travel to the client:
+      // the operator copies the resulting URL into HighLevel, so there is no way
+      // to render it masked. It is scoped to inbound contact-sync only, and this
+      // route is manager+ (see the auth gate above).
+      if (row.provider === "highlevel") {
+        const creds = await decryptCredentials(
+          row.credentials,
+          workspaceId,
+          row.provider,
+        );
+        const secret =
+          typeof creds.highlevel_webhook_secret === "string"
+            ? creds.highlevel_webhook_secret
+            : "";
+        return {
+          ...base,
+          highlevel_webhook_secret: secret,
+          highlevel_webhook_url: secret
+            ? `${appUrl}/api/webhooks/highlevel?wsid=${workspaceId}&token=${secret}`
+            : "",
+        };
+      }
+
+      return base;
+    }),
+  );
 
   return NextResponse.json({ integrations: masked });
 }
@@ -94,8 +156,10 @@ export async function PUT(
 ) {
   const { id: workspaceId } = await params;
 
+  // Admins only, the same rule as the integrations_write_admins policy: the
+  // write below uses the service role, so this check is the policy.
   const auth = await requireWorkspaceMember(workspaceId, {
-    minRole: "manager",
+    minRole: "admin",
   });
   if (!auth.ok) return auth.response;
 
@@ -111,13 +175,36 @@ export async function PUT(
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
   );
 
-  // Load existing to merge (don't overwrite masked values)
-  const { data: existing } = await svc
+  // Load existing to merge (don't overwrite masked values). `updated_at` es el testigo del CAS de
+  // más abajo. Un error de lectura NO es "no existe": iría por el INSERT de una fila nueva.
+  const { data: existing, error: readError } = await svc
     .from("integrations")
-    .select("credentials, config, oauth_tokens")
+    .select("credentials, config, oauth_tokens, updated_at")
     .eq("workspace_id", workspaceId)
     .eq("provider", parsed.data.provider)
-    .single();
+    .maybeSingle();
+  if (readError) {
+    console.error("[PUT /api/workspace/[id]/integrations] read error:", readError.message);
+    return NextResponse.json(
+      { error: "No se pudo guardar la integración. Intenta de nuevo." },
+      { status: 500 },
+    );
+  }
+
+  // OpenRouter models: only catalog models, like the agents. The value already
+  // stored is accepted unchanged, so an older workspace can still save its
+  // other settings.
+  if (parsed.data.provider === "openrouter") {
+    const storedConfig = (existing?.config as Record<string, unknown> | null) ?? {};
+    // `model` is the key older configs used; getWorkspaceModel still reads it.
+    for (const key of ["default_model", "fallback_model", "model"] as const) {
+      const value = parsed.data.config?.[key];
+      if (value === undefined || value === null || value === "") continue;
+      if (typeof value !== "string" || (!isCatalogModel(value) && value !== storedConfig[key])) {
+        return NextResponse.json({ error: MODEL_NOT_IN_CATALOG }, { status: 400 });
+      }
+    }
+  }
 
   // Filter out masked placeholder values from credentials update
   const newCreds = Object.fromEntries(
@@ -138,24 +225,172 @@ export async function PUT(
   ) {
     mergedCreds.highlevel_webhook_secret = randomBytes(24).toString("hex");
   }
-  const mergedConfig = {
-    ...((existing?.config as object) ?? {}),
-    ...(parsed.data.config ?? {}),
+  const provider = parsed.data.provider;
+  const enabled = parsed.data.enabled ?? true;
+
+  // YCloud's number: saved in E.164 when that is certain, confirmed against
+  // the account's own lines when the key allows it (a warning, never a block).
+  let config = parsed.data.config;
+  let phoneWarning: string | undefined;
+  const typedPhone = phoneString(config?.phone_number);
+  if (provider === "ycloud" && config && typedPhone) {
+    const normalized = await normalizeConfiguredPhone(
+      typedPhone,
+      await ycloudApiKey(newCreds, existing?.credentials ?? null, workspaceId),
+      await workspaceCountryCode(svc, workspaceId),
+    );
+    config = { ...config, phone_number: normalized.value };
+    phoneWarning = normalized.warning;
+  }
+
+  // A WhatsApp provider only becomes the active one when it can actually talk:
+  // activating it disables the other, and without a key, secret or sender id
+  // replies would be dropped silently. Checked against what is stored plus what
+  // this request brings (masked values keep the stored ones).
+  if (isWhatsAppProvider(provider) && enabled) {
+    const missing = missingWhatsAppFields(provider, mergedCreds, {
+      ...((existing?.config as Record<string, unknown> | null) ?? {}),
+      ...(config ?? {}),
+    });
+    if (missing.length > 0) {
+      return NextResponse.json(
+        {
+          error: `Para activar ${WHATSAPP_PROVIDER_LABELS[provider]} falta ${missing.join(", ")}.`,
+          missing,
+        },
+        { status: 422 },
+      );
+    }
+  }
+
+  // Encrypt the whole merged set before writing anything: incoming plaintext
+  // gets wrapped, values already stored encrypted are left untouched, and a
+  // legacy plaintext row is migrated in place the first time it is saved.
+  let encryptedCreds: Record<string, unknown>;
+  try {
+    encryptedCreds = await encryptCredentials(mergedCreds, workspaceId, provider);
+  } catch (err) {
+    console.error(
+      "[PUT /api/workspace/[id]/integrations] encrypt error:",
+      err instanceof Error ? err.message : "unknown",
+    );
+    return NextResponse.json(
+      { error: "No se pudo guardar la integración. Intenta de nuevo." },
+      { status: 500 },
+    );
+  }
+
+  // WhatsApp (YCloud ↔ Kapso): only one may be active per workspace (unique
+  // index). save_whatsapp_integration() disables the one being replaced and
+  // saves this one in a single transaction, carrying the workspace-level
+  // settings over (what the UI sends > the active provider's > this row's
+  // own). The replaced row keeps its credentials, so switching back needs no
+  // re-entry.
+  if (isWhatsAppProvider(provider)) {
+    const { data: switchedFrom, error } = await svc.rpc("save_whatsapp_integration", {
+      p_workspace_id: workspaceId,
+      p_provider: provider,
+      p_enabled: enabled,
+      p_credentials: encryptedCreds,
+      p_config: config ?? {},
+      p_workspace_keys: [...WORKSPACE_WHATSAPP_SETTINGS],
+    });
+    if (error) {
+      console.error("[PUT /api/workspace/[id]/integrations] save error:", error.message);
+      return NextResponse.json(
+        { error: "No se pudo guardar la integración. Intenta de nuevo." },
+        { status: 500 },
+      );
+    }
+    return NextResponse.json({
+      ok: true,
+      ...(typeof switchedFrom === "string" && switchedFrom ? { switchedFrom } : {}),
+      ...(provider === "ycloud" && typedPhone
+        ? { phoneNumber: config?.phone_number, ...(phoneWarning ? { warning: phoneWarning } : {}) }
+        : {}),
+    });
+  }
+
+  const clientConfig: Record<string, unknown> = { ...(config ?? {}) };
+  for (const key of SERVER_CONFIG_KEYS) delete clientConfig[key];
+  const existingConfig = (existing?.config as Record<string, unknown> | null) ?? {};
+  const mergedConfig: Record<string, unknown> = { ...existingConfig, ...clientConfig };
+  // HighLevel: the stored zone belongs to the location it was read from.
+  // Another location drops it until saveHLLocationTimeZone reads the new one.
+  if (provider === "highlevel" && mergedConfig.location_id !== existingConfig.location_id) {
+    delete mergedConfig.timezone;
+    delete mergedConfig.timezone_source;
+  }
+  // Cal.com has no zone of its own: its tools use the workspace's scheduling
+  // zone (scheduling-timezone.ts). A zone an earlier version saved goes away.
+  if (provider === "caldotcom") {
+    for (const key of Object.keys(mergedConfig)) delete mergedConfig[key];
+  }
+
+  // Un token DISTINTO puede ser otra cuenta de HubSpot: hay que volver a probar la conexión, que
+  // es la que valida propiedades y portal. El mismo token reenviado no invalida nada. La huella se
+  // calcula sobre el token EN CLARO que llega en el body (antes de cifrar): el cifrado usa IV
+  // aleatorio, así que un hash del texto cifrado cambiaría en cada guardado del mismo token.
+  if (provider === "hubspot" && typeof newCreds.hubspot_token === "string") {
+    const fingerprint = hubSpotTokenFingerprint(newCreds.hubspot_token);
+    if (fingerprint !== existingConfig.token_fingerprint) {
+      mergedConfig.token_fingerprint = fingerprint;
+      mergedConfig.properties_ready = false;
+    }
+  }
+
+  // La fila se escribe con CAS sobre el `updated_at` leído, nunca con un upsert de la foto. Si
+  // otro PUT o mark_hubspot_ready la cambió en el medio (el trigger trg_integrations_updated_at
+  // mueve updated_at en todo UPDATE), no se afecta ninguna fila y se responde 409: sin esto, un
+  // PUT atrasado restauraba token, huella, properties_ready y portal de la cuenta anterior sobre
+  // enlaces ya hechos con la nueva. Sin fila leída va un INSERT; si otro primer guardado ganó la
+  // carrera, su 23505 de (workspace_id, provider) es el mismo 409.
+  const row = {
+    enabled,
+    credentials: encryptedCreds,
+    config: mergedConfig,
   };
+  const { data: written, error } = existing
+    ? await svc
+        .from("integrations")
+        .update(row)
+        .eq("workspace_id", workspaceId)
+        .eq("provider", provider)
+        .eq("updated_at", existing.updated_at)
+        .select("id")
+    : await svc
+        .from("integrations")
+        .insert({ workspace_id: workspaceId, provider, ...row })
+        .select("id");
 
-  const { error } = await svc.from("integrations").upsert(
-    {
-      workspace_id: workspaceId,
-      provider: parsed.data.provider,
-      enabled: parsed.data.enabled ?? true,
-      credentials: mergedCreds,
-      config: mergedConfig,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "workspace_id,provider" },
+  const concurrent = NextResponse.json(
+    { error: "La configuración cambió mientras guardabas. Recarga e inténtalo de nuevo." },
+    { status: 409 },
   );
-
-  if (error)
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    const otherCrmActive =
+      error.code === "23505" && (error.message ?? "").includes("uq_integrations_one_active_crm");
+    if (error.code === "23505" && !otherCrmActive) return concurrent;
+    if (otherCrmActive && (provider === "highlevel" || provider === "hubspot")) {
+      const other = provider === "highlevel" ? "hubspot" : "highlevel";
+      return NextResponse.json(
+        {
+          error: `Ya tienes ${CRM_LABELS[other]} conectado como CRM. Desactívalo antes de conectar ${CRM_LABELS[provider]}.`,
+        },
+        { status: 409 },
+      );
+    }
+    console.error("[PUT /api/workspace/[id]/integrations] write error:", error.message);
+    return NextResponse.json(
+      { error: "No se pudo guardar la integración. Intenta de nuevo." },
+      { status: 500 },
+    );
+  }
+  if (!written || written.length === 0) return concurrent;
+  // HighLevel's bare times are read in the location's zone: store it with
+  // the (possibly new) location. Never throws; a miss leaves the one stored.
+  if (provider === "highlevel" && enabled) {
+    await saveHLLocationTimeZone(workspaceId);
+  }
   return NextResponse.json({ ok: true });
 }

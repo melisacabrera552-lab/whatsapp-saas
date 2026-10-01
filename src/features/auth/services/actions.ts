@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { isSignupOpen, markAsSuperAdmin } from "./signup-gate";
+import { postLoginPath } from "../lib/post-login";
 
 // Map Supabase auth error messages (English) to Spanish for the UI.
 // Falls back to the original message when there is no known translation.
@@ -13,6 +14,10 @@ function localizeAuthError(msg: string): string {
     "Invalid login credentials": "Correo o contraseña incorrectos",
     "Email not confirmed": "Email no confirmado",
     "User already registered": "Este correo ya está registrado",
+    // /signup only renders while there is no user yet, i.e. on a fresh
+    // install — where the first account comes from scripts/seed-admin.mjs.
+    "Signups not allowed for this instance":
+      "El registro público está cerrado. Si estás instalando la plataforma, crea tu super admin con scripts/seed-admin.mjs (INSTALAR.md, paso 8).",
   };
   return map[msg] ?? msg;
 }
@@ -50,7 +55,7 @@ export async function login(
     return { error: localizeAuthError(error.message) };
   }
 
-  redirect("/inbox");
+  redirect(postLoginPath(formData.get("next")));
 }
 
 export async function signup(

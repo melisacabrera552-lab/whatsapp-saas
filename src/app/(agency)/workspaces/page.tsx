@@ -34,7 +34,7 @@ export default async function AgencyWorkspacesPage() {
     (sum, w) => sum + w.conversation_count,
     0,
   );
-  const connectedCount = workspaces.filter((w) => w.ycloud_connected).length;
+  const connectedCount = workspaces.filter((w) => w.whatsapp_provider).length;
 
   // Meta's quota is per workspace, so the bill is the sum of each client's
   // overage — not the overage of the combined total.
@@ -64,7 +64,7 @@ export default async function AgencyWorkspacesPage() {
       icon: MessageCircle,
     },
     {
-      label: "YCloud conectado",
+      label: "WhatsApp conectado",
       value: connectedCount,
       icon: Wifi,
     },

@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { AgentCard } from "./agent-card";
 import { AgentConfigSheet } from "./agent-config-sheet";
+import { JevPanel, type JevSettings } from "@/features/jev-judge/components/jev-panel";
 import type { AgentDto, AgentType } from "@/features/agents/types";
 
 const ORDER: AgentType[] = ["setter", "soporte", "agendamiento"];
@@ -27,9 +28,16 @@ function sortAgents(list: AgentDto[]): AgentDto[] {
 export function AgentsTab({
   workspaceId,
   initialAgents,
+  jev,
+  canManage,
+  isAdmin = false,
 }: {
   workspaceId: string;
   initialAgents: AgentDto[];
+  jev: JevSettings;
+  canManage: boolean;
+  /** Only an admin's playground runs write tools (the server decides; this is the note). */
+  isAdmin?: boolean;
 }) {
   const router = useRouter();
   const [agents, setAgents] = useState<AgentDto[]>(() =>
@@ -84,6 +92,14 @@ export function AgentsTab({
 
   return (
     <div className="space-y-5">
+      <JevPanel
+        workspaceId={workspaceId}
+        initialEnabled={jev.enabled}
+        initialUses={jev.uses}
+        keyReady={jev.keyReady}
+        judgmentsToday={jev.judgmentsToday}
+        canManage={canManage}
+      />
       <p className="text-sm text-muted-foreground">
         Configura tus 3 agentes. Solo uno puede estar activo a la vez.
       </p>
@@ -110,6 +126,7 @@ export function AgentsTab({
             if (!o) setEditing(null);
           }}
           onSaved={handleSaved}
+          isAdmin={isAdmin}
         />
       )}
 

@@ -581,7 +581,7 @@ function Alerts() {
           <XCircle className="h-4 w-4" />
           <AlertTitle>Error de envío</AlertTitle>
           <AlertDescription>
-            YCloud rechazó el mensaje. Revisa el template.
+            El proveedor rechazó el mensaje. Revisa el template.
           </AlertDescription>
         </Alert>
       </div>
@@ -771,7 +771,7 @@ function ToastFeedback() {
         </Button>
         <Button
           variant="outline"
-          onClick={() => toast.error("Falló el envío a YCloud")}
+          onClick={() => toast.error("Falló el envío por WhatsApp")}
         >
           Error
         </Button>
@@ -838,7 +838,7 @@ function EmptyStates() {
           icon={Inbox}
           title="Sin conversaciones"
           description="Cuando llegue el primer mensaje de WhatsApp aparecerá aquí."
-          cta="Conectar YCloud"
+          cta="Conectar WhatsApp"
         />
         <EmptyStateBlock
           icon={SearchX}

@@ -5,7 +5,8 @@ export interface WorkspaceWithStats {
   created_at: string;
   member_count: number;
   conversation_count: number;
-  ycloud_connected: boolean;
+  /** The workspace's active WhatsApp provider, or null when not connected. */
+  whatsapp_provider: "ycloud" | "kapso" | null;
   /** Outbound non-template messages this calendar month (Meta's free quota). */
   service_messages_month: number;
   /** Straight-line projection of that count to the end of the month. */
@@ -30,18 +31,71 @@ export interface ClientCredentials {
 
 export type CreateWorkspaceResult =
   | {
+      needsConfirmation: true;
+      existingUser: { email: string; fullName: string | null };
+      workspaceId?: never;
+      webhookUrl?: never;
+      clientCredentials?: never;
+      error?: never;
+    }
+  | {
       workspaceId: string;
+      /** Webhook URL per WhatsApp provider — the client picks one in Integraciones. */
+      webhookUrls: { ycloud: string; kapso: string };
+      /** YCloud's webhook URL (kept for API callers from before Kapso). */
       webhookUrl: string;
       clientCredentials?: ClientCredentials | null;
+      needsConfirmation?: never;
       error?: never;
     }
   | {
       workspaceId?: never;
+      webhookUrls?: never;
       webhookUrl?: never;
       clientCredentials?: never;
+      needsConfirmation?: never;
       error: string;
     };
 
 export type GetWorkspacesResult =
   | { workspaces: WorkspaceWithStats[]; error?: never }
   | { workspaces?: never; error: string };
+
+export interface WorkspaceMember {
+  userId: string;
+  email: string;
+  fullName: string | null;
+  role: string;
+  isActive: boolean;
+  /** Super admins' passwords are never reset from the agency sheet. */
+  isSuperAdmin: boolean;
+  /** The caller — nobody resets their own password from here. */
+  isSelf: boolean;
+  /**
+   * The OTHER workspaces where this person is active: the password is
+   * global, so a reset changes it there too.
+   */
+  otherWorkspaces: OtherWorkspace[];
+}
+
+export interface OtherWorkspace {
+  id: string;
+  name: string;
+}
+
+export type GetWorkspaceMembersResult =
+  | { members: WorkspaceMember[]; error?: never }
+  | { members?: never; error: string };
+
+export type ResetMemberPasswordResult =
+  | { email: string; password: string; error?: never; otherWorkspaces?: never }
+  | {
+      email?: never;
+      password?: never;
+      error: string;
+      /**
+       * Set when the reset needs confirming for these other workspaces (the
+       * current list: it may differ from the one the admin saw).
+       */
+      otherWorkspaces?: OtherWorkspace[];
+    };

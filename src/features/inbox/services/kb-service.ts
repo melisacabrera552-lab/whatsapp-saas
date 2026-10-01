@@ -24,6 +24,9 @@ function getEmbeddingModel(apiKey: string) {
 
 const CHUNK_SIZE = 500;
 const CHUNK_OVERLAP = 50;
+// The query embedding runs inside the agent's turn: a hung provider must not
+// eat the time the buffer reserved for the model and the send.
+const QUERY_EMBED_TIMEOUT_MS = 15_000;
 
 /**
  * Splits text into overlapping windows of CHUNK_SIZE chars.
@@ -176,6 +179,7 @@ export async function searchKb(
   const { embedding: queryEmbedding } = await embed({
     model: getEmbeddingModel(apiKey),
     value: query,
+    abortSignal: AbortSignal.timeout(QUERY_EMBED_TIMEOUT_MS),
   });
 
   // pgvector cosine distance search via RPC

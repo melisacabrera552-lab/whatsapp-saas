@@ -19,7 +19,8 @@ async function withTransientRetry<T>(
   {
     retries = 2,
     baseDelayMs = 400,
-  }: { retries?: number; baseDelayMs?: number } = {},
+    canRetry = () => true,
+  }: { retries?: number; baseDelayMs?: number; canRetry?: () => boolean } = {},
 ): Promise<T> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -27,7 +28,7 @@ async function withTransientRetry<T>(
       return await fn();
     } catch (err) {
       lastErr = err;
-      if (attempt === retries || !isTransientError(err)) throw err;
+      if (attempt === retries || !isTransientError(err) || !canRetry()) throw err;
       await new Promise((r) => setTimeout(r, baseDelayMs * (attempt + 1)));
     }
   }
@@ -37,9 +38,18 @@ import { createClient as svcClient } from "@supabase/supabase-js";
 import type {
   Tool as ForgeTool,
   ToolContext,
+  ToolExecution,
+  ToolStart,
 } from "@/features/tools/core/tool";
+
+// Upper bounds for one model call, so a hung provider can't eat the whole
+// function (the buffer needs time left to send and to close the batch). A
+// tool turn runs up to 5 steps, each with its own tool calls.
+const LLM_TIMEOUT_MS = 60_000;
+const LLM_TOOL_TURN_TIMEOUT_MS = 120_000;
 import { registry } from "@/features/tools/index";
 import { getActiveAgent } from "@/features/agents/services/active-agent";
+import { decryptCredentials } from "@/shared/lib/integration-secrets";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // getWorkspaceModel
@@ -91,7 +101,16 @@ export async function getOpenRouterApiKey(
 ): Promise<string> {
   const envKey = process.env.OPENROUTER_API_KEY ?? "";
   if (!workspaceId) return envKey;
+  return (await readWorkspaceOpenRouterKey(workspaceId)) ?? envKey;
+}
 
+/**
+ * The workspace's own OpenRouter key, or null when its calls run on the
+ * platform (agency) key from OPENROUTER_API_KEY.
+ */
+export async function readWorkspaceOpenRouterKey(
+  workspaceId: string,
+): Promise<string | null> {
   try {
     const db = svcClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -104,13 +123,17 @@ export async function getOpenRouterApiKey(
       .eq("provider", "openrouter")
       .maybeSingle();
 
-    const creds = data?.credentials as Record<string, unknown> | null;
-    const key = creds?.openrouter_api_key;
+    const creds = await decryptCredentials(
+      data?.credentials as Record<string, unknown> | null,
+      workspaceId,
+      "openrouter",
+    );
+    const key = creds.openrouter_api_key;
     if (typeof key === "string" && key.length > 0) return key;
   } catch {
-    // Non-fatal — fall through to env key
+    // Non-fatal — the caller falls back to the platform key
   }
-  return envKey;
+  return null;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -166,11 +189,13 @@ export async function generateReply(
       { role: "user", content: userMessage },
     ],
     maxOutputTokens: 1024,
+    abortSignal: AbortSignal.timeout(LLM_TIMEOUT_MS),
   });
 
-  // AI SDK v6 exposes inputTokens / outputTokens; map to stable naming
-  const promptTokens = result.usage?.inputTokens ?? 0;
-  const completionTokens = result.usage?.outputTokens ?? 0;
+  // AI SDK v6 exposes inputTokens / outputTokens; map to stable naming.
+  // totalUsage sums every step (usage is the last step only).
+  const promptTokens = result.totalUsage?.inputTokens ?? 0;
+  const completionTokens = result.totalUsage?.outputTokens ?? 0;
 
   return {
     text: result.text,
@@ -198,6 +223,22 @@ export async function generateChatReply(params: {
   /** Optional tool-calling: when provided, the model can invoke these tools. */
   tools?: ForgeTool[];
   toolContext?: ToolContext;
+  /** Model steps when tools are on (a tool call and its answer are two). Default 5. */
+  maxSteps?: number;
+  /**
+   * One HTTP request per step: no SDK retries and no retry of the turn. For a
+   * caller that reserved the call's ceiling for exactly that many requests.
+   */
+  noRetries?: boolean;
+  /** Cuts each tool result to this many characters before the model reads it. */
+  maxToolResultChars?: number;
+  /**
+   * One tool call per step: the model is asked not to call tools in parallel,
+   * and from the second call of the turn on, a call is answered without
+   * running (a provider may ignore the request). For a caller whose ceiling
+   * counts one result per tool.
+   */
+  oneToolCall?: boolean;
 }): Promise<GenerateReplyResult> {
   const modelId =
     params.model ??
@@ -215,6 +256,14 @@ export async function generateChatReply(params: {
   });
 
   // Bridge Forge tools → AI SDK ToolSet (same shape as generateWithTools).
+  // Once a tool that isn't read-only has run, a failed call is not retried:
+  // the whole turn would run, and repeat, that tool. "Has run" is what the
+  // registry reports: a write the tool refused or reported as failed changed
+  // nothing (like the buffer's write record), and one that never started
+  // (bad arguments, a sensitive tool) doesn't count; one that threw or timed
+  // out (ok null) may have written, so it does.
+  let wroteSomething = false;
+  let toolCalls = 0;
   const aiTools: ToolSet = {};
   if (params.tools && params.toolContext) {
     const ctx = params.toolContext;
@@ -222,30 +271,81 @@ export async function generateChatReply(params: {
       aiTools[forgeTool.name] = tool({
         description: forgeTool.description,
         inputSchema: zodSchema(forgeTool.schema),
-        execute: async (args: unknown): Promise<unknown> =>
-          registry.run(forgeTool.name, args, ctx),
+        execute: async (args: unknown): Promise<unknown> => {
+          toolCalls++;
+          if (params.oneToolCall && toolCalls > 1) {
+            return { ok: false, error: "Solo se puede usar una herramienta por mensaje." };
+          }
+          const result = await registry.runTool(forgeTool, args, ctx, {
+            ...(forgeTool.preferredTimeoutMs !== undefined
+              ? { timeoutMs: forgeTool.preferredTimeoutMs }
+              : {}),
+            onExecuted: (execution) => {
+              if (execution.sensitivity !== "read" && execution.ok !== false) {
+                wroteSomething = true;
+              }
+            },
+          });
+          const max = params.maxToolResultChars;
+          if (max === undefined) return result;
+          const text = JSON.stringify(result) ?? "";
+          return text.length <= max ? result : { truncated: true, result: text.slice(0, max) };
+        },
       });
     }
   }
   const hasTools = Object.keys(aiTools).length > 0;
 
-  const result = await withTransientRetry(() =>
-    generateText({
-      model: openrouter.chat(modelId),
-      messages: [
-        { role: "system", content: params.systemPrompt },
-        ...params.messages,
-      ],
-      tools: hasTools ? aiTools : undefined,
-      stopWhen: hasTools ? stepCountIs(5) : undefined,
-      maxOutputTokens: params.maxOutputTokens ?? 512,
-    }),
-  );
+  // What the provider already answered, step by step, attempts included: when
+  // the turn then fails, the caller can settle what was really spent.
+  let stepsDone = 0;
+  const usageSoFar = { promptTokens: 0, completionTokens: 0 };
 
+  let result;
+  try {
+    result = await withTransientRetry(
+      () =>
+      generateText({
+        model: openrouter.chat(modelId),
+        messages: [
+          { role: "system", content: params.systemPrompt },
+          ...params.messages,
+        ],
+        tools: hasTools ? aiTools : undefined,
+        stopWhen: hasTools ? stepCountIs(params.maxSteps ?? 5) : undefined,
+        maxOutputTokens: params.maxOutputTokens ?? 512,
+        ...(params.noRetries ? { maxRetries: 0 } : {}),
+        ...(params.oneToolCall && hasTools
+          ? { providerOptions: { openai: { parallelToolCalls: false } } }
+          : {}),
+        onStepFinish: (step) => {
+          stepsDone++;
+          usageSoFar.promptTokens += step.usage?.inputTokens ?? 0;
+          usageSoFar.completionTokens += step.usage?.outputTokens ?? 0;
+        },
+        abortSignal: AbortSignal.timeout(
+          hasTools ? LLM_TOOL_TURN_TIMEOUT_MS : LLM_TIMEOUT_MS,
+        ),
+      }),
+      { canRetry: () => !wroteSomething && !params.noRetries },
+    );
+  } catch (err) {
+    // The caller must know a write ran before the failure: sending the
+    // same turn again would run it again. And what the steps that finished
+    // spent (the failed request itself isn't in it).
+    if (err && typeof err === "object") {
+      if (wroteSomething) Object.assign(err, { wroteSomething: true });
+      Object.assign(err, { stepsDone, usageSoFar: { ...usageSoFar } });
+    }
+    throw err;
+  }
+
+  // totalUsage, not usage: with tools the model runs up to 5 steps, and usage
+  // only reports the last one.
   return {
     text: result.text,
-    promptTokens: result.usage?.inputTokens ?? 0,
-    completionTokens: result.usage?.outputTokens ?? 0,
+    promptTokens: result.totalUsage?.inputTokens ?? 0,
+    completionTokens: result.totalUsage?.outputTokens ?? 0,
   };
 }
 
@@ -262,6 +362,16 @@ export interface GenerateWithToolsParams {
   toolContext: ToolContext;
   /** Prior conversation turns (oldest→newest), injected between system and the current batch. */
   history?: Array<{ role: "user" | "assistant"; content: string }>;
+  /**
+   * Called right before each tool runs. If it throws, that tool doesn't run
+   * and the whole turn is aborted with its error.
+   */
+  onToolStart?: (start: ToolStart) => void | Promise<void>;
+  /**
+   * Called once per tool that actually ran — also when the turn later fails,
+   * which is when the caller most needs to know a write already happened.
+   */
+  onToolExecuted?: (execution: ToolExecution) => void | Promise<void>;
 }
 
 export interface GenerateWithToolsResult {
@@ -269,6 +379,22 @@ export interface GenerateWithToolsResult {
   inputTokens: number;
   outputTokens: number;
   toolCallsExecuted: number;
+  /**
+   * Qué herramienta se ejecutó y qué devolvió, para cada tool-call del turno,
+   * en orden.
+   *
+   * `output` es el `ToolResult` que `registry.runTool` entregó como `output`
+   * del `tool-result` del step (AI SDK v6: `StepResult.toolResults[]` =
+   * `{ type: "tool-result", toolCallId, toolName, input, output }`); `toolName`
+   * es el mismo metadato genérico del AI SDK, sin decoración.
+   *
+   * Canal deliberadamente genérico: este módulo no sabe —ni tiene que saber—
+   * qué herramienta dejó qué marca. Quien llama (hoy `buffer.ts`, para el
+   * traspaso diferido de `handoff_human`) es el que interpreta el contenido,
+   * y necesita `toolName` para no confiar en cualquier tool dinámica que
+   * imite la forma de la marca (n8n).
+   */
+  toolResults: { toolName: string; output: unknown }[];
 }
 
 /**
@@ -301,7 +427,17 @@ export async function generateWithTools(
   // Build AI SDK v6 ToolSet from available Forge tools.
   // Each entry uses inputSchema (zodSchema wrapper) + execute — the correct v6 shape.
   // execute returns Promise<unknown> to satisfy ToolSet's output constraint.
+  // runTool (not run by name) so dynamic n8n tools — resolved per-workspace
+  // by getEnabledTools, never registered in the shared registry Map — work
+  // the same way static tools do.
   const aiTools: ToolSet = {};
+  // A start hook that fails (the caller couldn't record a write) aborts the
+  // turn: the model must not carry on as if the tool had run.
+  const aborter = new AbortController();
+  let startFailure: unknown = null;
+  // Tools still running when the turn ends early (a timeout, a provider
+  // error): waited for, so the caller's hooks see how each one ended.
+  const inFlight = new Set<Promise<unknown>>();
 
   for (const forgeTool of params.availableTools ?? []) {
     const ctx = params.toolContext;
@@ -309,29 +445,72 @@ export async function generateWithTools(
       description: forgeTool.description,
       inputSchema: zodSchema(forgeTool.schema),
       execute: async (args: unknown): Promise<unknown> => {
-        return registry.run(forgeTool.name, args, ctx);
+        const run = registry.runTool(forgeTool, args, ctx, {
+          ...(forgeTool.preferredTimeoutMs !== undefined
+            ? { timeoutMs: forgeTool.preferredTimeoutMs }
+            : {}),
+          onStart: async (start) => {
+            try {
+              await params.onToolStart?.(start);
+            } catch (err) {
+              startFailure ??= err;
+              aborter.abort(err);
+              throw err;
+            }
+          },
+          onExecuted: params.onToolExecuted,
+        });
+        inFlight.add(run);
+        try {
+          return await run;
+        } finally {
+          inFlight.delete(run);
+        }
       },
     });
   }
 
   const hasTools = Object.keys(aiTools).length > 0;
 
-  const result = await generateText({
-    model: openrouter.chat(modelId),
-    messages: [
-      { role: "system", content: params.systemPrompt },
-      ...(params.history ?? []),
-      { role: "user", content: params.userMessage },
-    ],
-    tools: hasTools ? aiTools : undefined,
-    stopWhen: hasTools ? stepCountIs(5) : undefined,
-    maxOutputTokens: 1024,
-  });
+  let result: Awaited<ReturnType<typeof generateText>>;
+  try {
+    result = await generateText({
+      model: openrouter.chat(modelId),
+      messages: [
+        { role: "system", content: params.systemPrompt },
+        ...(params.history ?? []),
+        { role: "user", content: params.userMessage },
+      ],
+      tools: hasTools ? aiTools : undefined,
+      stopWhen: hasTools ? stepCountIs(5) : undefined,
+      maxOutputTokens: 1024,
+      abortSignal: AbortSignal.any([
+        aborter.signal,
+        AbortSignal.timeout(hasTools ? LLM_TOOL_TURN_TIMEOUT_MS : LLM_TIMEOUT_MS),
+      ]),
+    });
+  } catch (err) {
+    // Bounded by the registry's per-tool timeout.
+    await Promise.allSettled([...inFlight]);
+    throw startFailure ?? err;
+  }
+  // On the last step the SDK may finish without noticing the abort: a reply
+  // written as if the unrecorded tool had run must not go out.
+  if (startFailure) throw startFailure;
 
+  // totalUsage, not usage: a tool turn runs up to 5 steps, and usage only
+  // reports the last one — the budget would see a fraction of the real spend.
   return {
     text: result.text,
-    inputTokens: result.usage?.inputTokens ?? 0,
-    outputTokens: result.usage?.outputTokens ?? 0,
-    toolCallsExecuted: result.steps?.length ?? 0,
+    inputTokens: result.totalUsage?.inputTokens ?? 0,
+    outputTokens: result.totalUsage?.outputTokens ?? 0,
+    // Tool calls across every step (a plain reply is one step, zero calls).
+    toolCallsExecuted: (result.steps ?? []).reduce(
+      (n, step) => n + (step.toolCalls?.length ?? 0),
+      0,
+    ),
+    toolResults: (result.steps ?? []).flatMap((step) =>
+      (step.toolResults ?? []).map((r) => ({ toolName: r.toolName, output: r.output })),
+    ),
   };
 }

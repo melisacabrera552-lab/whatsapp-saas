@@ -10,7 +10,7 @@
 //   env            Generate secrets + write/update .env.local from pasted keys
 //   db-push [ref]  supabase link (ref derived from the URL) + db push
 //   set-app-url U  Set NEXT_PUBLIC_APP_URL to the prod URL (run after deploy)
-//   cron-sql       Fill supabase/cron/schedule-buffer-flush.sql with real values
+//   cron-sql       Fill the cron jobs' SQL templates with real values (buffer-flush, automations, classify-topics)
 //   vercel-env     Push .env.local vars to Vercel production (best effort)
 //   doctor         Check prerequisites + which keys are still missing
 //   help           Show this usage
@@ -18,27 +18,40 @@
 
 import { randomBytes } from "node:crypto";
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENV_PATH = resolve(ROOT, ".env.local");
 const EXAMPLE_PATH = resolve(ROOT, ".env.local.example");
-const SUPABASE_API = "https://api.supabase.com"; // Management API base
-
-// Cron jobs agendables via pg_cron + pg_net. Cada uno tiene su propia
-// plantilla SQL en supabase/cron/; ambas comparten __APP_URL__ + __CRON_SECRET__.
-const CRON_JOBS = {
-  "buffer-flush": {
+// One job per cron endpoint. Adding one here is all cron-sql and cron-apply
+// need; cron.schedule() with the same name updates the job in place, so
+// re-running either command is idempotent.
+const CRON_JOBS = [
+  {
+    name: "buffer-flush",
     tpl: resolve(ROOT, "supabase/cron/schedule-buffer-flush.sql"),
     filled: resolve(ROOT, "supabase/cron/schedule-buffer-flush.filled.sql"),
   },
-  "keep-alive": {
+  {
+    name: "automations",
+    tpl: resolve(ROOT, "supabase/cron/schedule-automations.sql"),
+    filled: resolve(ROOT, "supabase/cron/schedule-automations.filled.sql"),
+  },
+  {
+    name: "classify-topics",
+    tpl: resolve(ROOT, "supabase/cron/schedule-classify-topics.sql"),
+    filled: resolve(ROOT, "supabase/cron/schedule-classify-topics.filled.sql"),
+  },
+  {
+    // Evita la pausa por inactividad del plan free de Supabase.
+    name: "keep-alive",
     tpl: resolve(ROOT, "supabase/cron/schedule-keep-alive.sql"),
     filled: resolve(ROOT, "supabase/cron/schedule-keep-alive.filled.sql"),
   },
-};
+];
+const SUPABASE_API = "https://api.supabase.com"; // Management API base
 
 // Secrets we generate locally — never asked for, never rotated on re-run.
 const GENERATED = {
@@ -170,17 +183,20 @@ function cronInputs() {
   return { env, appUrl, secret };
 }
 
-function resolveCronJob(jobKey) {
-  const job = CRON_JOBS[jobKey];
+// Sin nombre, todos los jobs; con nombre (p.ej. keep-alive), solo ese.
+function selectCronJobs(args) {
+  const name = args[0];
+  if (!name) return CRON_JOBS;
+  const job = CRON_JOBS.find((j) => j.name === name);
   if (!job) {
-    fail(`Job de cron desconocido: "${jobKey}". Usa uno de: ${Object.keys(CRON_JOBS).join(", ")}`);
+    fail(`Job de cron desconocido: "${name}". Usa uno de: ${CRON_JOBS.map((j) => j.name).join(", ")}`);
   }
-  return job;
+  return [job];
 }
 
-function fillCronSql(tplPath, appUrl, secret) {
-  if (!existsSync(tplPath)) fail(`No encuentro la plantilla ${tplPath}`);
-  return readFileSync(tplPath, "utf8")
+function fillCronSql(job, appUrl, secret) {
+  if (!existsSync(job.tpl)) fail(`No encuentro la plantilla ${job.tpl}`);
+  return readFileSync(job.tpl, "utf8")
     .replaceAll("__APP_URL__", appUrl)
     .replaceAll("__CRON_SECRET__", secret);
 }
@@ -225,6 +241,79 @@ function cmdEnv() {
   log("➡️  NEXT_PUBLIC_APP_URL se setea después del deploy con: set-app-url <url>");
 }
 
+// Migrations that only existed on the retired provider/kapso branch. Their
+// content lives on main as 20260927000000/1 (idempotent), so an install coming
+// from that branch just needs them marked as reverted in its history — or
+// `supabase db push` refuses ("Remote migration versions not found").
+// Marking a version that was never applied is a no-op, so this always runs:
+// no parsing of the CLI's table output.
+const RETIRED_KAPSO_BRANCH_MIGRATIONS = ["20260731000000", "20260731000001"];
+
+// Versions from the community PR stack (#8, #9, #11, #12, #13, #14, #15, #16 and
+// #17, on provider/kapso) that main does not have. main re-lands what it adopts under new versions, so an
+// install that ran those PR branches needs these marked as reverted too, or
+// `db push` refuses. This only fixes the history: whatever those versions
+// created stays in the database.
+const RETIRED_PR_STACK_MIGRATIONS = [
+  "20260811000000", // #9 message_errors
+  "20260823000000", // #8 reserve_llm_turn (on main: 20260928000000)
+  "20260824000000", // #8 security definer grants
+  "20260824000001", // #8 sum_daily_llm_tokens (on main: 20260928000001)
+  "20260824000002", // #8 check_outbound_24h_window grant
+  "20260824000003", // #9 upsert_batch_and_link_message
+  "20260824000004",
+  "20260824000005",
+  "20260824000006",
+  "20260824000007",
+  "20260825000000", // #9 reconciled orphan batches
+  "20260902000000", // #9 claim_next_batch stale retries
+  "20260906000000", // #9 contacts HL unique index
+  "20260906000001", // #9 invoker RPC grants
+  "20260830000000", // #11 n8n_tools (on main: 20260930000001)
+  "20260830000001", // #11 retire custom_webhook (on main: 20260930000007)
+  "20260906000002", // #14 cancel/reschedule seed (on main: 20260930000000)
+  "20260907000000", // #12 handoff_human seed (on main: 20260930000002)
+  "20260820010000", // #15 Cal.com booking uid (on main: 20261003000000)
+  "20260820020000", // #15 Cal.com tools seed (on main: 20261003000001)
+  "20260821010000", // #15 Cal.com slot claim guard (on main: 20261003000002)
+  "20260903000000", // #16 automation engine (on main: 20261001000000)
+  "20260904000000", // #16 automation_rules writes service-role only
+  "20260904000002", // #16 claim_next_automation_run time floor
+  "20260908000000", // #16 appointment_upcoming reminders
+  "20260915000000", // #13 insight_topics (on main: 20261002000000)
+  "20260915000001", // #13 classify_topics_rpcs (on main: 20261002000001)
+  "20260915000002", // #13 get_insights (on main: 20261002000002)
+  "20260922000000", // #17 integration_provider 'hubspot' (on main: 20261003000004)
+  "20260922000001", // #17 contacts.hs_contact_id (on main: 20261003000005)
+  "20260922000002", // #17 one active CRM (on main: 20261003000006)
+  "20260922000003", // #17 conversation-log queue (on main: 20261003000007)
+  "20260922000004", // #17 mark_hubspot_ready (on main: 20261003000008)
+  "20260922000005", // #17 read_hubspot_link (on main: 20261003000009)
+];
+
+function repairRetiredMigrations() {
+  // A version still shipped in supabase/migrations must never be marked as
+  // reverted: db push would then apply it again over what it already created.
+  const shipped = new Set(
+    readdirSync(resolve(ROOT, "supabase/migrations")).map((f) => f.split("_")[0]),
+  );
+  const clash = [...RETIRED_KAPSO_BRANCH_MIGRATIONS, ...RETIRED_PR_STACK_MIGRATIONS].filter(
+    (v) => shipped.has(v),
+  );
+  if (clash.length > 0) {
+    fail(
+      `Estas versiones están en la lista de revertidas y también en supabase/migrations: ${clash.join(", ")}. Corrige la lista antes de correr db-push.`,
+    );
+  }
+  log("Historial de migraciones: marco como revertidas las de la antigua rama provider/kapso y las de los PRs de la comunidad que main no tiene (no-op si nunca se aplicaron).");
+  run(
+    `supabase migration repair --status reverted ${[
+      ...RETIRED_KAPSO_BRANCH_MIGRATIONS,
+      ...RETIRED_PR_STACK_MIGRATIONS,
+    ].join(" ")}`,
+  );
+}
+
 function cmdDbPush(args) {
   ensureCli("supabase", "https://supabase.com/docs/guides/cli");
   const env = readEnvFile(ENV_PATH);
@@ -235,9 +324,10 @@ function cmdDbPush(args) {
   log(`Linking Supabase project: ${ref}`);
   log("(Si pide la DB password y corres esto sin interacción, exporta SUPABASE_DB_PASSWORD primero.)");
   run(`supabase link --project-ref ${ref}`);
+  repairRetiredMigrations();
   run("supabase db push");
   ok("Migraciones aplicadas (incluye pg_cron + pg_net).");
-  log("➡️  Después del deploy: set-app-url <url> y luego cron-sql para agendar el buffer-flush.");
+  log("➡️  Después del deploy: set-app-url <url> y luego cron-apply (o cron-sql) para agendar los crons (buffer-flush, automations, classify-topics y keep-alive).");
 }
 
 function cmdSetAppUrl(args) {
@@ -250,36 +340,42 @@ function cmdSetAppUrl(args) {
   log("➡️  Acuérdate de setear esta misma URL en Vercel (vercel-env) y en Supabase → Auth → Site URL.");
 }
 
+// Only the SQL goes to stdout, so `cron-sql | pbcopy` copies something the SQL
+// Editor runs as is; the status lines go to stderr (still on screen). Before,
+// the ✅/➡️ lines landed in the clipboard too and the paste failed on line 1.
 function cmdCronSql(args) {
-  const jobKey = args[0] || "buffer-flush";
-  const job = resolveCronJob(jobKey);
   const { appUrl, secret } = cronInputs();
-  const filled = fillCronSql(job.tpl, appUrl, secret);
-  writeFileSync(job.filled, filled);
-  ok(`SQL del cron "${jobKey}" generado: ${job.filled}`);
-  log("➡️  Pega el siguiente SQL en Supabase → SQL Editor → Run:\n");
-  log(filled);
+  for (const job of selectCronJobs(args)) {
+    const filled = fillCronSql(job, appUrl, secret);
+    writeFileSync(job.filled, filled);
+    console.error(`✅ SQL del cron '${job.name}' generado: ${job.filled}`);
+    process.stdout.write(`${filled.trimEnd()}\n\n`);
+  }
+  console.error("➡️  Pega el SQL en Supabase → SQL Editor → Run (en macOS: node scripts/setup.mjs cron-sql | pbcopy).");
 }
 
 async function cmdCronApply(args) {
-  const jobKey = args[0] || "buffer-flush";
-  const job = resolveCronJob(jobKey);
+  const jobs = selectCronJobs(args);
   const { env, appUrl, secret } = cronInputs();
   const ref = deriveRef(env.NEXT_PUBLIC_SUPABASE_URL);
   if (!ref) fail("No pude derivar el project-ref de NEXT_PUBLIC_SUPABASE_URL.");
   if (!mgmtToken()) {
     warn("Sin SUPABASE_ACCESS_TOKEN — usa el camino manual:");
-    log(`   node scripts/setup.mjs cron-sql ${jobKey}   (y pega el SQL en el SQL Editor)`);
+    log(`   node scripts/setup.mjs cron-sql ${args[0] ?? ""}   (y pega el SQL en el SQL Editor)`);
     return;
   }
-  const r1 = await remoteSql(ref, fillCronSql(job.tpl, appUrl, secret));
-  if (!r1.ok) fail(`No pude agendar el cron ${r1.status}: ${JSON.stringify(r1.data)}`);
-  const r2 = await remoteSql(
-    ref,
-    `select jobname, schedule, active from cron.job where jobname = '${jobKey}';`,
-  );
-  ok(`Cron "${jobKey}" agendado vía Management API.`);
-  log(`Verificación: ${JSON.stringify(r2.data)}`);
+  for (const job of jobs) {
+    const r1 = await remoteSql(ref, fillCronSql(job, appUrl, secret));
+    if (!r1.ok) {
+      fail(`No pude agendar el cron '${job.name}' ${r1.status}: ${JSON.stringify(r1.data)}`);
+    }
+    const r2 = await remoteSql(
+      ref,
+      `select jobname, schedule, active from cron.job where jobname = '${job.name}';`,
+    );
+    ok(`Cron '${job.name}' agendado vía Management API.`);
+    log(`Verificación: ${JSON.stringify(r2.data)}`);
+  }
 }
 
 async function cmdSiteUrl() {
@@ -291,17 +387,77 @@ async function cmdSiteUrl() {
   const ref = deriveRef(env.NEXT_PUBLIC_SUPABASE_URL);
   if (!ref) fail("No pude derivar el project-ref de NEXT_PUBLIC_SUPABASE_URL.");
   if (!mgmtToken()) {
-    warn("Sin SUPABASE_ACCESS_TOKEN — hazlo manual en Supabase → Authentication → URL Configuration:");
-    log(`   Site URL     = ${appUrl}`);
-    log(`   Redirect URL = ${appUrl}/**`);
+    warn("Sin SUPABASE_ACCESS_TOKEN — hazlo manual en Supabase → Authentication:");
+    log(`   URL Configuration → Site URL     = ${appUrl}`);
+    log(`   URL Configuration → Redirect URL = ${appUrl}/**`);
+    log(`   Sign In / Providers → desactiva "Allow new users to sign up"`);
     return;
   }
+  // disable_signup: the app's /signup is invite-only, but Supabase Auth's own
+  // /auth/v1/signup accepts the public anon key. Users are created through the
+  // Admin API (seed-admin, agency panel, team invites), which keeps working.
   const res = await mgmtCall("PATCH", `/v1/projects/${ref}/config/auth`, {
     site_url: appUrl,
     uri_allow_list: `${appUrl}/**`,
+    disable_signup: true,
   });
   if (!res.ok) fail(`Management API (config/auth) falló ${res.status}: ${JSON.stringify(res.data)}`);
-  ok(`Site URL = ${appUrl} · Redirect = ${appUrl}/** (vía Management API)`);
+  ok(`Site URL = ${appUrl} · Redirect = ${appUrl}/** · registro público cerrado (vía Management API)`);
+}
+
+// Is Supabase Auth's own /auth/v1/signup closed? Public endpoint, no token.
+async function signupIsClosed(env) {
+  const url = (env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/+$/, "");
+  const anon = env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+  if (!url || isPlaceholder(anon)) return null;
+  try {
+    const res = await fetch(`${url}/auth/v1/settings`, { headers: { apikey: anon } });
+    if (!res.ok) return null;
+    const settings = await res.json();
+    return settings?.disable_signup === true;
+  } catch {
+    return null;
+  }
+}
+
+// Closes public signup ONLY — unlike site-url it leaves Site URL and Redirect
+// URLs alone, so it is safe on an install that customized them. Exits non-zero
+// unless it could confirm signup is closed.
+async function cmdCloseSignup() {
+  const env = readEnvFile(ENV_PATH);
+  let patched = false;
+  if (mgmtToken()) {
+    const ref = deriveRef(env.NEXT_PUBLIC_SUPABASE_URL);
+    if (!ref) fail("No pude derivar el project-ref de NEXT_PUBLIC_SUPABASE_URL.");
+    const res = await mgmtCall("PATCH", `/v1/projects/${ref}/config/auth`, {
+      disable_signup: true,
+    });
+    if (!res.ok) fail(`Management API (config/auth) falló ${res.status}: ${JSON.stringify(res.data)}`);
+    patched = true;
+  } else {
+    warn('Sin SUPABASE_ACCESS_TOKEN — hazlo manual: Supabase → Authentication → Sign In / Providers → desactiva "Allow new users to sign up" → Save.');
+  }
+
+  // Auth may take a few seconds to pick up the new config after the PATCH.
+  let closed = await signupIsClosed(env);
+  for (let i = 0; patched && closed === false && i < 10; i++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    closed = await signupIsClosed(env);
+  }
+
+  if (closed === true) {
+    ok("Registro público de Supabase Auth: cerrado.");
+  } else if (closed === false) {
+    fail(
+      patched
+        ? "El registro público de Supabase Auth sigue ABIERTO tras el cambio; revisa el toggle a mano."
+        : "El registro público de Supabase Auth sigue ABIERTO. Desactívalo y vuelve a correr close-signup.",
+    );
+  } else {
+    fail(
+      "No pude verificar /auth/v1/settings (¿faltan NEXT_PUBLIC_SUPABASE_URL o NEXT_PUBLIC_SUPABASE_ANON_KEY en .env.local?). Revisa el toggle a mano.",
+    );
+  }
 }
 
 function cmdVercelEnv() {
@@ -364,10 +520,11 @@ Uso: node scripts/setup.mjs <comando>
   env            Genera secrets + escribe .env.local desde las keys pegadas
   db-push [ref]  supabase link (ref derivado de la URL) + db push
   set-app-url U  Setea NEXT_PUBLIC_APP_URL a la URL de prod (post-deploy)
-  cron-sql [job]    Imprime el SQL del cron para pegar en el SQL Editor (manual)
-  cron-apply [job]  Agenda el cron vía Management API (necesita SUPABASE_ACCESS_TOKEN)
-                    [job] = buffer-flush (default) | keep-alive
-  site-url       Setea Site URL + Redirect en Supabase vía Management API (idem)
+  cron-sql [job]    Imprime el SQL de los crons (buffer-flush, automations, classify-topics y keep-alive) para pegar en el SQL Editor
+  cron-apply [job]  Agenda los crons vía Management API (necesita SUPABASE_ACCESS_TOKEN)
+                    Sin [job] agenda todos; con nombre, solo ese (p.ej. keep-alive)
+  site-url       Setea Site URL + Redirect y cierra el registro público (idem)
+  close-signup   Solo cierra el registro público de Supabase Auth y lo verifica
   vercel-env     Empuja las vars de .env.local a Vercel production
   doctor         Revisa prerequisitos y qué keys faltan
   help           Muestra esta ayuda
@@ -399,6 +556,9 @@ switch (cmd) {
     break;
   case "site-url":
     await cmdSiteUrl();
+    break;
+  case "close-signup":
+    await cmdCloseSignup();
     break;
   case "vercel-env":
     cmdVercelEnv();

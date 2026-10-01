@@ -1,40 +1,95 @@
 import { NextResponse } from "next/server";
-import { processNextBatch } from "@/features/inbox/services/buffer";
+import { isAuthorized } from "@/lib/cron-auth";
+import {
+  hasTimeToClaim,
+  processNextBatch,
+  reconcileOrphanedMessages,
+} from "@/features/inbox/services/buffer";
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Vercel Cron: process buffer batches every minute
+// Buffer drain — called every minute by pg_cron (job `buffer-flush`, see
+// supabase/migrations/20260615000003_enable_pg_cron_pg_net.sql) with
+// `Authorization: Bearer ${CRON_SECRET}`. There is no Vercel Cron for this
+// route; do not add one.
 //
-// For production at scale, consider:
-//   - pg_cron every 5s for lower latency
-//   - pgmq (message queue) for fan-out across multiple workers
+// Each tick drains up to MAX_BATCHES_PER_RUN batches, each of which may cost
+// an LLM turn plus tool calls. maxDuration keeps the function alive long
+// enough; if it is ever hit, claim_next_batch() reclaims the stale batch after
+// its 7-minute lease (always above maxDuration) and counts a retry.
 //
-// Vercel sets Authorization: Bearer {CRON_SECRET} automatically when the
-// cron job is configured in vercel.json.
+// The status is the tick's health, as in cron/automations: 200 when both
+// phases (orphan reconciliation, the drain) did their work, 500 with the
+// failed phase's code when one couldn't (its lookup or the claim itself
+// failed). A batch that failed is per-item work, counted in `failed`, and
+// still a 200. pg_net only records the answer (net._http_response): a 500
+// triggers no retry, it makes the failure visible.
 // ──────────────────────────────────────────────────────────────────────────────
 
-export const schedule = "* * * * *";
+export const maxDuration = 300;
 
 // Max batches to drain per cron tick — protects against burst accumulation
 const MAX_BATCHES_PER_RUN = 10;
 
 export async function GET(request: Request): Promise<NextResponse> {
-  // Verify Vercel cron auth header
-  const authHeader = request.headers.get("Authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  const startedAt = Date.now();
+  if (!isAuthorized(request.headers.get("Authorization"))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const results: Array<{ processed: boolean; error?: string }> = [];
+  let recovered = 0;
+  let processed = 0;
+  let failed = 0;
+  const errors: string[] = [];
 
-  for (let i = 0; i < MAX_BATCHES_PER_RUN; i++) {
-    const result = await processNextBatch();
-    results.push(result);
-
-    // No more ready batches — stop early
-    if (!result.processed) break;
+  // Safety net: inbound messages a persistently failing upsertBatch() left
+  // without a batch get one now. Its failure is reported, and the drain (an
+  // independent phase) still runs.
+  try {
+    const reconciled = await reconcileOrphanedMessages();
+    recovered = reconciled.recovered;
+    if (reconciled.error) errors.push(reconciled.error);
+  } catch (err) {
+    console.error("[cron/buffer-flush] reconcile threw:", err instanceof Error ? err.message : err);
+    errors.push("reconcile_threw");
   }
 
-  const processedCount = results.filter((r) => r.processed).length;
+  // Never claim a batch without time to finish it: a function killed mid-turn
+  // leaves the batch stuck for the 7-minute lease.
+  try {
+    for (
+      let i = 0;
+      i < MAX_BATCHES_PER_RUN && hasTimeToClaim(startedAt, maxDuration);
+      i++
+    ) {
+      const result = await processNextBatch();
+      if (result.processed) {
+        processed++;
+        continue;
+      }
+      // The claim itself failed: the tick couldn't get work. Not one more
+      // failed batch.
+      if (result.phaseError) {
+        errors.push(result.phaseError);
+        break;
+      }
+      // A batch that failed is re-queued or dead-lettered by processNextBatch;
+      // keep draining the others.
+      if (result.error) {
+        failed++;
+        continue;
+      }
+      // No more ready batches — stop early.
+      break;
+    }
+  } catch (err) {
+    // Codes only, never the exception's text.
+    console.error("[cron/buffer-flush] drain threw:", err instanceof Error ? err.message : err);
+    errors.push("drain_threw");
+  }
 
-  return NextResponse.json({ ok: true, processed: processedCount });
+  const ok = errors.length === 0;
+  return NextResponse.json(
+    { ok, processed, recovered, failed, ...(ok ? {} : { errors }) },
+    { status: ok ? 200 : 500 },
+  );
 }

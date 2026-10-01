@@ -8,11 +8,11 @@ import {
   CalendarClock,
   CalendarPlus,
   CalendarSearch,
-  Webhook,
   FlaskConical,
   Wrench,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { BETA_TOOLS } from "@/features/tools/lib/beta-tools";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -30,6 +30,8 @@ interface ToolItem {
 
 interface Props {
   workspaceId: string;
+  /** The viewer's role in this workspace. */
+  role: string;
   initialTools: ToolItem[];
 }
 
@@ -38,7 +40,8 @@ const TOOL_ICONS: Record<string, React.ElementType> = {
   schedule_link: CalendarClock,
   schedule_highlevel: CalendarPlus,
   check_availability: CalendarSearch,
-  custom_webhook: Webhook,
+  schedule_calcom: CalendarPlus,
+  check_availability_calcom: CalendarSearch,
   echo: FlaskConical,
 };
 
@@ -63,7 +66,10 @@ const sensitivityConfig: Record<
   },
 };
 
-export function ToolsCatalog({ workspaceId, initialTools }: Props) {
+export function ToolsCatalog({ workspaceId, role, initialTools }: Props) {
+  // Toggling or configuring a tool needs manager (the tools API); agents and
+  // viewers see the catalog read-only instead of controls that would fail.
+  const canManage = role === "admin" || role === "manager";
   const [tools, setTools] = useState<ToolItem[]>(initialTools);
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -134,6 +140,12 @@ export function ToolsCatalog({ workspaceId, initialTools }: Props) {
         <p className="mt-1 text-sm text-muted-foreground">
           Activa o desactiva las capacidades del agente para este workspace.
         </p>
+        {!canManage && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Solo managers y administradores del workspace pueden activar o
+            configurar tools.
+          </p>
+        )}
       </div>
 
       <ul className="space-y-2" role="list">
@@ -142,7 +154,7 @@ export function ToolsCatalog({ workspaceId, initialTools }: Props) {
           const config =
             sensitivityConfig[sensitivity] ?? sensitivityConfig.read;
           const isToggling = pending.has(tool.id);
-          const configurable = CONFIGURABLE_TOOLS.has(tool.key);
+          const configurable = canManage && CONFIGURABLE_TOOLS.has(tool.key);
           const isOpen = expanded === tool.id;
           const ToolIcon = TOOL_ICONS[tool.key] ?? Wrench;
           const BadgeIcon = config.Icon;
@@ -177,11 +189,22 @@ export function ToolsCatalog({ workspaceId, initialTools }: Props) {
                       )}
                       {config.label}
                     </Badge>
+                    {BETA_TOOLS.has(tool.key) && (
+                      <Badge
+                        variant="outline"
+                        className="text-xs font-normal text-purple-400 border-purple-400/30"
+                      >
+                        Beta
+                      </Badge>
+                    )}
                   </div>
                   {tool.description && (
                     <p className="text-xs text-muted-foreground line-clamp-2">
                       {tool.description}
                     </p>
+                  )}
+                  {BETA_TOOLS.has(tool.key) && (
+                    <p className="text-xs text-purple-400/90">{BETA_TOOLS.get(tool.key)}</p>
                   )}
                   {configurable && (
                     <button
@@ -206,7 +229,7 @@ export function ToolsCatalog({ workspaceId, initialTools }: Props) {
                 <Switch
                   checked={tool.enabled}
                   onCheckedChange={() => handleToggle(tool)}
-                  disabled={isToggling}
+                  disabled={!canManage || isToggling}
                   aria-label={`${tool.enabled ? "Desactivar" : "Activar"} ${tool.name}`}
                 />
               </div>
