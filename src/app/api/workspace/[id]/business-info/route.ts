@@ -10,7 +10,7 @@ import {
 
 const UpdateSchema = z.object({
   structured: z.record(z.string(), z.unknown()).optional(),
-  free_text: z.string().max(10_000).optional(),
+  free_text: z.string().max(10_000).nullable().optional(),
 });
 
 // ── GET /api/workspace/[id]/business-info ─────────────────────────────────────

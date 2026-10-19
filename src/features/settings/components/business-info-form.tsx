@@ -92,8 +92,15 @@ export function BusinessInfoForm({ workspaceId, initial }: Props) {
       });
 
       if (!res.ok) {
-        const data = (await res.json()) as { error?: string };
-        throw new Error(data.error ?? "Error al guardar");
+        const data = (await res.json().catch(() => ({}))) as {
+          error?: unknown;
+        };
+        // Validation errors come back as objects; never show "[object Object]".
+        throw new Error(
+          typeof data.error === "string"
+            ? data.error
+            : "Revisa los datos e intenta de nuevo",
+        );
       }
 
       toast.success("Información guardada");
