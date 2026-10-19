@@ -1,31 +1,31 @@
 import type { Metadata } from "next";
 import { GeistMono } from "geist/font/mono";
-import { Inter, Instrument_Serif } from "next/font/google";
+import { Manrope, Instrument_Serif } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { Agentation } from "agentation";
 import { brandStyleOverride } from "@/lib/branding";
 import "./globals.css";
 
-// Inter — body, párrafos, micro-copy (Pixiweb)
-const inter = Inter({
+// Manrope — headings, UI y body (Pixiweb)
+const manrope = Manrope({
   subsets: ["latin"],
-  variable: "--font-body",
+  variable: "--font-manrope",
   display: "swap",
 });
 
-// Instrument Serif — frase itálica de acento (.accent), gesto firma de Pixiweb
-const instrumentSerif = Instrument_Serif({
+// Instrument Serif itálica — frase de acento (.accent), gesto firma de Pixiweb
+const editorial = Instrument_Serif({
   subsets: ["latin"],
   weight: "400",
-  style: ["normal", "italic"],
-  variable: "--font-serif",
+  style: "italic",
+  variable: "--font-editorial",
   display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Agente WhatsApp",
-  description: "Plataforma de inbox conversacional para WhatsApp con IA",
+  title: "Pixiweb · Mensajería",
+  description: "Espacio de atención y automatización de conversaciones",
 };
 
 export default function RootLayout({
@@ -44,11 +44,11 @@ export default function RootLayout({
         </head>
       )}
       <body
-        className={`${inter.variable} ${instrumentSerif.variable} ${GeistMono.variable} font-body antialiased`}
+        className={`${manrope.variable} ${editorial.variable} ${GeistMono.variable} font-body antialiased`}
       >
         <ThemeProvider
           attribute="class"
-          defaultTheme="dark"
+          defaultTheme="light"
           enableSystem
           disableTransitionOnChange
         >

@@ -47,6 +47,12 @@ const config: Config = {
         border: "oklch(var(--border) / <alpha-value>)",
         input: "oklch(var(--input) / <alpha-value>)",
         ring: "oklch(var(--ring) / <alpha-value>)",
+        "primary-hover": "oklch(var(--primary-hover) / <alpha-value>)",
+        sidebar: "oklch(var(--sidebar) / <alpha-value>)",
+        "sidebar-foreground": "oklch(var(--sidebar-foreground) / <alpha-value>)",
+        "sidebar-active": "oklch(var(--sidebar-active) / <alpha-value>)",
+        "sidebar-muted": "oklch(var(--sidebar-muted) / <alpha-value>)",
+        lavender: "oklch(var(--lavender) / <alpha-value>)",
         chart: {
           "1": "oklch(var(--chart-1) / <alpha-value>)",
           "2": "oklch(var(--chart-2) / <alpha-value>)",
@@ -56,21 +62,28 @@ const config: Config = {
         },
       },
       borderRadius: {
-        // Escala Pixiweb — radios generosos. Card (rounded-xl) = 24px.
+        // Escala Pixiweb: card (rounded-xl) = 24px, contenedores grandes 40px.
+        xl: "1.5rem",
+        "2xl": "2.5rem",
         lg: "var(--radius)",
-        md: "calc(var(--radius) - 4px)",
-        sm: "calc(var(--radius) - 8px)",
-        xl: "calc(var(--radius) + 4px)",
-        "2xl": "calc(var(--radius) + 12px)",
+        md: "0.875rem",
+        sm: "0.5rem",
+      },
+      textColor: {
+        // Texto en color de marca con contraste AA sobre fondos claros.
+        primary: {
+          DEFAULT: "oklch(var(--primary-text) / <alpha-value>)",
+          foreground: "oklch(var(--primary-foreground) / <alpha-value>)",
+        },
       },
       fontFamily: {
-        // Satoshi (Fontshare, vía @import en globals.css) — headings y UI
-        display: ["Satoshi", "var(--font-body)", "system-ui", "sans-serif"],
-        // Inter (next/font) — body, párrafos, micro-copy
-        body: ["var(--font-body)", "system-ui", "sans-serif"],
-        sans: ["var(--font-body)", "system-ui", "sans-serif"],
-        // Instrument Serif (next/font) — frase itálica de acento (.accent)
-        serif: ["var(--font-serif)", "Georgia", "serif"],
+        // Manrope (next/font) — headings, UI y body
+        display: ["var(--font-manrope)", "ui-sans-serif", "system-ui", "sans-serif"],
+        body: ["var(--font-manrope)", "ui-sans-serif", "system-ui", "sans-serif"],
+        sans: ["var(--font-manrope)", "ui-sans-serif", "system-ui", "sans-serif"],
+        // Instrument Serif itálica (next/font) — frase de acento (.accent)
+        editorial: ["var(--font-editorial)", "Georgia", "serif"],
+        serif: ["var(--font-editorial)", "Georgia", "serif"],
         mono: ["var(--font-geist-mono)", "ui-monospace", "monospace"],
       },
       keyframes: {

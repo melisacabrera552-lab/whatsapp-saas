@@ -1,218 +1,125 @@
-/*
- * Satoshi (display) — AUTO-HOSPEDADA en /public/fonts/satoshi.
- * Se sirve desde 'self', así cumple la CSP estricta (font-src 'self') sin
- * depender del CDN de Fontshare. Inter + Instrument Serif van vía next/font (layout.tsx).
- */
-@font-face {
-  font-family: "Satoshi";
-  src: url("/fonts/satoshi/Satoshi-Regular.woff2") format("woff2");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Satoshi";
-  src: url("/fonts/satoshi/Satoshi-Medium.woff2") format("woff2");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Satoshi";
-  src: url("/fonts/satoshi/Satoshi-Bold.woff2") format("woff2");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/*
- * Design System — Agente WhatsApp · "Pixiweb · Slate Navy"
- * Fuente de verdad de marca:       Pixiweb Design System Re-Branding (colors_and_type.css).
- * Fuente de verdad de componentes: /ui (showcase). Ver COMPONENT_RULES.md.
- *
- * Marca:   Slate Navy #1E293B / Deep Navy #0F172A
- * Acento:  Electric   #1A4FFF  (CTAs, links, focus, ring)
- * Tipos:   Satoshi (display) · Inter (body) · Instrument Serif (frase itálica de acento)
- *
- * Tokens = triplets OKLch crudos -> Tailwind inyecta alpha vía oklch(var(--token) / <alpha-value>).
- * Esto habilita modificadores de opacidad (bg-primary/10) manteniendo color OKLch nativo.
- *
- * Glass (visionOS): la translucidez se aplica con utilidades explícitas (.glass) — NO via los
- * tokens semánticos. El glow ambiental ahora es ELÉCTRICO (azul) para que el vidrio "lea".
- */
-
+/* Pixiweb: DESIGN.md. Raw OKLCH triplets preserve Tailwind opacity modifiers.
+   Source sRGB colors converted once. Stable surfaces keep conversations legible. */
 @layer base {
   :root {
-    /* Light mode (toggle) — blanco frío Pixiweb (neutral-50 / white), NUNCA crema */
-    --background: 0.99 0.003 248;
-    --foreground: 0.2077 0.0398 265.8;
-
-    --card: 1 0 0;
-    --card-foreground: 0.2077 0.0398 265.8;
-
-    --popover: 1 0 0;
-    --popover-foreground: 0.2077 0.0398 265.8;
-
-    /* Electric — acento de marca (CTAs, links, focus) */
-    --primary: 0.5267 0.2633 264.7;
-    --primary-foreground: 0.99 0.005 250;
-
-    --secondary: 0.9683 0.0069 247.9;
-    --secondary-foreground: 0.2795 0.0368 260;
-
-    --muted: 0.9683 0.0069 247.9;
-    --muted-foreground: 0.5544 0.0407 257.4;
-
-    --accent: 0.9288 0.0126 255.5;
-    --accent-foreground: 0.2795 0.0368 260;
-
-    --destructive: 0.6368 0.2078 25.3;
-    --destructive-foreground: 0.99 0 0;
-
-    --success: 0.6959 0.1491 162.5;
-    --warning: 0.7686 0.1647 70.1;
-    --info: 0.5267 0.2633 264.7;
-
-    --border: 0.9288 0.0126 255.5;
-    --input: 0.9288 0.0126 255.5;
-    --ring: 0.5267 0.2633 264.7;
-
-    --chart-1: 0.5267 0.2633 264.7;
-    --chart-2: 0.6667 0.176 269.9;
-    --chart-3: 0.7686 0.1647 70.1;
-    --chart-4: 0.6959 0.1491 162.5;
-    --chart-5: 0.6368 0.2078 25.3;
-
-    /* Glassmorphism (light) */
-    --glass-bg: 1 0 0;
-    --glass-bg-alpha: 0.6;
-    --glass-border-alpha: 0.5;
-
-    --radius: 1.25rem;
+    --background: 0.85451 0.00000 89.87556;
+    --foreground: 0.00000 0.00000 0.00000;
+    --card: 1.00000 0.00000 89.87556;
+    --card-foreground: 0.00000 0.00000 0.00000;
+    --popover: 1.00000 0.00000 89.87556;
+    --popover-foreground: 0.00000 0.00000 0.00000;
+    --primary: 0.50246 0.19841 284.11350;
+    --primary-text: 0.41893 0.19232 281.21366;
+    --primary-foreground: 1.00000 0.00000 89.87556;
+    --primary-hover: 0.41893 0.19232 281.21366;
+    --secondary: 0.94912 0.00000 89.87556;
+    --secondary-foreground: 0.00000 0.00000 0.00000;
+    --muted: 0.94912 0.00000 89.87556;
+    --muted-foreground: 0.40906 0.02016 296.94416;
+    --accent: 0.87124 0.14888 118.55775;
+    --accent-foreground: 0.00000 0.00000 0.00000;
+    --destructive: 0.50326 0.17935 21.79936;
+    --destructive-foreground: 1.00000 0.00000 89.87556;
+    --success: 0.45987 0.09807 157.72307;
+    --warning: 0.48768 0.10245 68.29018;
+    --info: 0.47590 0.11135 252.92121;
+    --border: 0.65138 0.02103 298.85585;
+    --input: 0.48164 0.02605 299.68649;
+    --ring: 0.41893 0.19232 281.21366;
+    --chart-1: 0.50246 0.19841 284.11350;
+    --chart-2: 0.45987 0.09807 157.72307;
+    --chart-3: 0.48768 0.10245 68.29018;
+    --chart-4: 0.47590 0.11135 252.92121;
+    --chart-5: 0.50326 0.17935 21.79936;
+    --sidebar: 0.00000 0.00000 0.00000;
+    --sidebar-foreground: 0.94912 0.00000 89.87556;
+    --sidebar-active: 0.92802 0.22019 124.99698;
+    --sidebar-muted: 0.81808 0.01850 299.99839;
+    --lavender: 0.76426 0.13526 295.10915;
+    --radius: 1rem;
+    --ease: cubic-bezier(.22,1,.36,1);
   }
-
   .dark {
-    /* Dark mode (default) — Deep Navy #0F172A base, para que el glass + electric brillen */
-    --background: 0.2077 0.0398 265.8;
-    --foreground: 0.98 0.005 250;
-
-    --card: 0.2449 0.0388 264.4;
-    --card-foreground: 0.98 0.005 250;
-
-    --popover: 0.2275 0.0376 263.4;
-    --popover-foreground: 0.98 0.005 250;
-
-    --primary: 0.5267 0.2633 264.7;
-    --primary-foreground: 0.99 0.01 250;
-
-    --secondary: 0.2795 0.0368 260;
-    --secondary-foreground: 0.98 0.005 250;
-
-    --muted: 0.2795 0.0368 260;
-    --muted-foreground: 0.7107 0.0351 256.8;
-
-    --accent: 0.3 0.036 262;
-    --accent-foreground: 0.98 0.005 250;
-
-    --destructive: 0.6368 0.2078 25.3;
-    --destructive-foreground: 0.99 0 0;
-
-    --success: 0.6959 0.1491 162.5;
-    --warning: 0.7686 0.1647 70.1;
-    --info: 0.6107 0.2098 267.5;
-
-    --border: 0.33 0.03 262;
-    --input: 0.35 0.03 262;
-    --ring: 0.5267 0.2633 264.7;
-
-    --chart-1: 0.5267 0.2633 264.7;
-    --chart-2: 0.6667 0.176 269.9;
-    --chart-3: 0.7686 0.1647 70.1;
-    --chart-4: 0.6959 0.1491 162.5;
-    --chart-5: 0.6368 0.2078 25.3;
-
-    /* Glassmorphism (dark) */
-    --glass-bg: 1 0 0;
-    --glass-bg-alpha: 0.04;
-    --glass-border-alpha: 0.08;
+    --background: 0.17491 0.00821 285.52050;
+    --foreground: 0.94912 0.00000 89.87556;
+    --card: 0.22254 0.01550 290.81314;
+    --card-foreground: 0.94912 0.00000 89.87556;
+    --popover: 0.22254 0.01550 290.81314;
+    --popover-foreground: 0.94912 0.00000 89.87556;
+    --primary: 0.76426 0.13526 295.10915;
+    --primary-text: 0.76426 0.13526 295.10915;
+    --primary-foreground: 0.17491 0.00821 285.52050;
+    --primary-hover: 0.81808 0.01850 299.99839;
+    --secondary: 0.30625 0.02520 294.69097;
+    --secondary-foreground: 0.94912 0.00000 89.87556;
+    --muted: 0.30625 0.02520 294.69097;
+    --muted-foreground: 0.81808 0.01850 299.99839;
+    --accent: 0.87124 0.14888 118.55775;
+    --accent-foreground: 0.00000 0.00000 0.00000;
+    --border: 0.48164 0.02605 299.68649;
+    --input: 0.65138 0.02103 298.85585;
+    --ring: 0.92802 0.22019 124.99698;
+    --destructive: 0.76 0.14 22;
+    --destructive-foreground: 0.17 0 0;
+    --success: 0.79 0.13 155;
+    --warning: 0.84 0.14 85;
+    --info: 0.79 0.10 250;
+    --chart-1: var(--primary);
+    --chart-2: var(--success);
+    --chart-3: var(--warning);
+    --chart-4: var(--info);
+    --chart-5: var(--destructive);
+  }
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground font-body antialiased; }
+  :focus-visible { outline: 2px solid oklch(var(--ring)); outline-offset: 3px; }
+  ::selection { background: oklch(var(--accent)); color: oklch(var(--accent-foreground)); }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
-
-@layer base {
-  * {
-    @apply border-border;
-  }
-
-  body {
-    @apply bg-background text-foreground font-body antialiased;
-    /* Glow ambiental ELÉCTRICO (azul) muy sutil para que el glass "lea" (estilo visionOS) */
-    background-image:
-      radial-gradient(
-        60rem 40rem at 15% -10%,
-        oklch(0.6107 0.2098 267.5 / 0.1),
-        transparent 60%
-      ),
-      radial-gradient(
-        50rem 40rem at 110% 10%,
-        oklch(0.6107 0.2098 267.5 / 0.05),
-        transparent 55%
-      );
-    background-attachment: fixed;
-  }
-}
-
 @layer components {
-  /*
-   * .glass — superficie translúcida estilo Apple/visionOS.
-   * Usar para cards destacadas, navs sticky, overlays. NO anidar glass dentro de glass.
-   */
+  /* Compatibility for existing cards; no continuous glow on data surfaces. */
   .glass {
-    background-color: oklch(var(--glass-bg) / var(--glass-bg-alpha));
-    -webkit-backdrop-filter: blur(20px) saturate(140%);
-    backdrop-filter: blur(20px) saturate(140%);
-    border: 1px solid oklch(var(--glass-bg) / var(--glass-border-alpha));
+    background-color: oklch(var(--card) / .96);
+    border: 1px solid oklch(var(--border) / .45);
   }
-
   .glass-strong {
-    background-color: oklch(
-      var(--glass-bg) / calc(var(--glass-bg-alpha) * 2.2)
-    );
-    -webkit-backdrop-filter: blur(28px) saturate(150%);
-    backdrop-filter: blur(28px) saturate(150%);
-    border: 1px solid oklch(var(--glass-bg) / var(--glass-border-alpha));
+    background-color: oklch(var(--card));
+    border: 1px solid oklch(var(--border) / .45);
   }
-
-  /*
-   * .accent — frase itálica en Instrument Serif, el gesto firma de Pixiweb.
-   * Usar en 1–4 palabras dentro de un heading. NUNCA en body copy ni en párrafos.
-   */
+  .pixi-sidebar {
+    background: oklch(var(--sidebar));
+    color: oklch(var(--sidebar-foreground));
+    --ring: var(--sidebar-active);
+  }
+  /* Frase itálica de acento: 1–4 palabras dentro de un heading, nunca en párrafos. */
   .accent {
-    font-family: var(--font-serif), Georgia, serif;
+    font-family: var(--font-editorial), Georgia, serif;
     font-style: italic;
     font-weight: 400;
     letter-spacing: -0.01em;
-    color: oklch(var(--primary));
+    color: oklch(var(--primary-text));
   }
-
-  .dark .accent {
-    /* electric-200 — más luminoso para leer sobre Deep Navy */
-    color: oklch(0.7705 0.1164 271.1);
-  }
-
-  /*
-   * .shadow-cta — sombra con tinte eléctrico para el CTA primario (Pixiweb).
-   * El botón de acción principal NUNCA lleva sombra gris neutra.
-   */
+  /* Sombra con tinte de marca para el CTA primario. */
   .shadow-cta {
-    box-shadow: 0 6px 20px -6px oklch(var(--primary) / 0.5);
-    transition: box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 6px 20px -6px oklch(var(--primary) / 0.45);
+    transition: box-shadow 200ms var(--ease);
   }
-
   .shadow-cta:hover {
-    box-shadow: 0 10px 28px -6px oklch(var(--primary) / 0.6);
+    box-shadow: 0 10px 28px -6px oklch(var(--primary) / 0.55);
+  }
+  .app-inbox { height: calc(100dvh - 7rem - env(safe-area-inset-bottom)); }
+  @media (min-width: 1024px) {
+    .app-inbox { height: calc(100dvh - 3.5rem); }
   }
 }

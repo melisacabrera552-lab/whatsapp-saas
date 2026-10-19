@@ -9,7 +9,10 @@ import {
   UserCheck,
   BarChart2,
   Bot,
+  ArrowLeft,
 } from "lucide-react";
+import Link from "next/link";
+import { DetailPanel } from "@/shared/components/detail-panel";
 import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -201,17 +204,22 @@ export function ChatThread({
         {/* Sticky header */}
         <header
           className={cn(
-            "glass-strong shrink-0 flex items-center justify-between",
+            "glass-strong shrink-0 flex flex-wrap items-center justify-between gap-2",
             "px-4 py-3 border-b border-border/50",
           )}
         >
-          <div className="space-y-0.5 min-w-0">
-            <h2 className="font-display text-sm font-semibold text-foreground truncate">
-              {conversation.contact.name ?? conversation.contact.phone}
-            </h2>
-            <p className="font-mono text-[10px] text-muted-foreground">
-              {conversation.contact.phone}
-            </p>
+          <div className="flex min-w-0 items-center gap-2">
+            <Button asChild variant="ghost" size="icon" className="md:hidden">
+              <Link href="/inbox" aria-label="Volver a conversaciones"><ArrowLeft aria-hidden="true" /></Link>
+            </Button>
+            <div className="space-y-0.5 min-w-0">
+              <h2 className="font-display text-sm font-semibold text-foreground truncate">
+                {conversation.contact.name ?? conversation.contact.phone}
+              </h2>
+              <p className="font-mono text-[10px] text-muted-foreground">
+                {conversation.contact.phone}
+              </p>
+            </div>
           </div>
 
           <div className="flex items-center gap-1 shrink-0">
@@ -225,7 +233,7 @@ export function ChatThread({
                   onClick={handleHandoffRequest}
                   disabled={handoffLoading}
                   aria-label="Solicitar handoff a humano"
-                  className="h-8 gap-1.5 text-xs text-amber-400 border-amber-400/30 hover:bg-amber-400/10"
+                  className="h-8 gap-1.5 text-xs text-warning border-warning/30 hover:bg-warning/10"
                 >
                   <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" />
                   Handoff
@@ -281,7 +289,7 @@ export function ChatThread({
                 className={cn(
                   "h-8 w-8",
                   showObservability &&
-                    "bg-[hsl(var(--electric-lime)/0.1)] text-[hsl(var(--electric-lime))]",
+                    "bg-primary/10 text-primary",
                 )}
               >
                 <BarChart2 className="h-4 w-4" aria-hidden="true" />
@@ -298,7 +306,7 @@ export function ChatThread({
               className={cn(
                 "h-8 w-8",
                 showCrm &&
-                  "bg-[hsl(var(--electric-lime)/0.1)] text-[hsl(var(--electric-lime))]",
+                  "bg-primary/10 text-primary",
               )}
             >
               <User className="h-4 w-4" aria-hidden="true" />
@@ -324,7 +332,7 @@ export function ChatThread({
                 <p className="text-sm text-muted-foreground">
                   No hay mensajes aún
                 </p>
-                <p className="text-xs text-muted-foreground/60 mt-1">
+                <p className="text-xs text-muted-foreground mt-1">
                   Los mensajes entrantes aparecerán aquí en tiempo real
                 </p>
               </div>
@@ -347,7 +355,7 @@ export function ChatThread({
           {/* Permissions first: with the 24h window closed, a viewer must still
               see "read only", not a template picker offering to send. */}
           {!canSendMessages(role) ? (
-            <p className="py-2 text-center text-xs text-muted-foreground/60 select-none">
+            <p className="py-2 text-center text-xs text-muted-foreground select-none">
               Solo lectura — sin permisos para enviar mensajes
             </p>
           ) : isWindowExpired ? (
@@ -453,19 +461,19 @@ export function ChatThread({
       </div>
 
       {/* Right: CRM panel */}
-      {showCrm && (
+      <DetailPanel open={showCrm} onOpenChange={setShowCrm} title="Datos del contacto">
         <CrmPanel
           contact={conversation.contact}
           conversationId={conversation.id}
         />
-      )}
+      </DetailPanel>
 
       {/* Right: Observability panel */}
-      {showObservability && (
-        <div className="w-full md:w-80 shrink-0 border-t md:border-t-0 md:border-l border-border/50 overflow-y-auto p-3">
+      <DetailPanel open={showObservability} onOpenChange={setShowObservability} title="Observabilidad">
+        <div className="p-3">
           <ObservabilityPanel conversationId={conversation.id} />
         </div>
-      )}
+      </DetailPanel>
     </div>
   );
 }

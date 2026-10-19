@@ -98,13 +98,13 @@ import {
 // Primary source: globals.css CSS variables.
 // ============================================================
 const BRAND = {
-  name: "Agente WhatsApp",
-  primaryHex: "#1A4FFF", // oklch(0.527 0.263 265) — Electric Blue (Pixiweb)
-  accentHex: "#1A4FFF",
-  font: "Satoshi (display) · Inter (body) · Instrument Serif (acento) · Geist Mono (datos)",
-  personality: "Pixiweb · Slate Navy — glass visionOS + acento eléctrico",
+  name: "Pixiweb · Mensajería",
+  primaryHex: "#5D47CE", // Violet primary in light mode
+  accentHex: "#CBE269",
+  font: "Manrope · Instrument Serif (editorial) · Geist Mono (datos)",
+  personality: "Piedra, violeta y acento lima",
   audience: "B2B · operadores / setters / admins",
-  radius: "20px",
+  radius: "14 / 16 / 24px",
 };
 
 const HAS_AGENTATION = process.env.NEXT_PUBLIC_HAS_AGENTATION === "true";
@@ -283,8 +283,8 @@ function Typography() {
   return (
     <Section
       title="Typography"
-      description="Satoshi Medium para display (nunca Bold), Inter para body, Instrument Serif para la frase itálica de acento, Geist Mono para datos."
-      tokens={["font-display (Satoshi)", "font-body (Inter)", ".accent (Instrument Serif)", "font-mono"]}
+      description="Manrope para interfaz, Instrument Serif para la frase itálica de acento y Geist Mono para datos."
+      tokens={["font-display (Manrope)", "font-body (Manrope)", ".accent (Instrument Serif)", "font-mono"]}
       when="Máximo 3 tamaños por pantalla. tracking-tight en headings. La coda .accent va en 1–4 palabras dentro de un heading."
       whenNot="No usar Bold en headings (Pixiweb es Medium). Nunca .accent en body copy."
     >
@@ -299,7 +299,7 @@ function Typography() {
           H2 · Conversaciones
         </p>
         <p className="text-xl font-medium">H3 · Detalle del contacto</p>
-        <p className="text-base">Body — texto base de la interfaz (Inter).</p>
+        <p className="text-base">Body — texto base de la interfaz (Manrope).</p>
         <p className="text-sm text-muted-foreground">
           Small / Caption — metadatos.
         </p>
@@ -494,7 +494,7 @@ function Cards() {
         <div className="glass rounded-lg p-6">
           <p className="font-display text-base font-semibold">Glass</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Translúcida + backdrop-blur. La firma visionOS.
+            Translúcida + backdrop-blur. Superficie de bienvenida; nunca detrás de mensajes.
           </p>
         </div>
       </div>
@@ -1112,7 +1112,7 @@ function PatternSidebar() {
               <MessageSquare className="h-4 w-4" />
             </div>
             <span className="font-display text-sm font-semibold">
-              Agente WhatsApp
+              Pixiweb · Mensajería
             </span>
           </div>
           <nav className="flex-1 space-y-1">
@@ -1232,7 +1232,7 @@ function PatternNavbar() {
               <MessageSquare className="h-4 w-4" />
             </div>
             <span className="font-display text-sm font-semibold">
-              Agente WhatsApp
+              Pixiweb · Mensajería
             </span>
           </div>
           <nav className="hidden items-center gap-1 sm:flex">
@@ -1299,6 +1299,7 @@ export function ComponentShowcase() {
             <ThemeToggle />
           </header>
 
+          <p className="mb-6 text-sm text-muted-foreground">Todos los datos de esta biblioteca son ejemplos ficticios. <a className="text-primary underline" href="/ui/preview">Abrir vistas omnicanal</a></p>
           <HowToPanel hasAgentation={HAS_AGENTATION} />
 
           {/* Part 1 */}
